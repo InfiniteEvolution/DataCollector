@@ -1,0 +1,24 @@
+//
+//  MotionDataCollectorTests.swift
+//  DataCollectorTests
+//
+//  Created by Antigravity on 05/12/25.
+//
+
+import Testing
+
+@testable import DataCollector
+
+@Suite @MainActor struct MotionDataCollectorTests {
+
+    @Test func initialization() {
+        let collector = MotionDataCollector()
+        #expect(collector.activityType == .unknown)
+    }
+
+    @Test func startStop() {
+        let collector = MotionDataCollector()
+        collector.start()
+        collector.stop()
+    }
+}

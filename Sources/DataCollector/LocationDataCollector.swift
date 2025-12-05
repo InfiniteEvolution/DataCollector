@@ -1,0 +1,163 @@
+//
+//  LocationDataCollector.swift
+//  DataCollector
+//
+//  Created by Antigravity on 04/12/25.
+//
+
+import CoreLocation
+import Foundation
+import Logger
+
+@Observable
+@MainActor
+final class LocationDataCollector: NSObject {
+    private(set) var totalDistance: CLLocationDistance = 0
+    private(set) var lastLocation: CLLocation = .init(latitude: 0, longitude: 0)
+    private(set) var startLocation: CLLocation = .init(latitude: 0, longitude: 0)
+
+    /// A stream of location updates.
+    public var locationUpdates: AsyncStream<CLLocation> {
+        _locationStream
+    }
+
+    private let (_locationStream, _locationContinuation) = AsyncStream<CLLocation>.makeStream()
+
+    func resetDistance() {
+        totalDistance = 0
+        startLocation = lastLocation
+    }
+
+    private var authorizationStatus: CLAuthorizationStatus = .notDetermined {
+        didSet {
+            guard
+                authorizationStatus == .authorizedAlways
+                    || authorizationStatus == .authorizedWhenInUse
+            else {
+                log.notice("Location authorization revoked or not granted.")
+                stop()
+                return
+            }
+
+            start()
+        }
+    }
+
+    private let locationManager = CLLocationManager()
+    private let log = LogContext("LDAT")
+    private var isCollecting = false
+
+    public override init() {
+        super.init()
+        setupLocationManager()
+        authorizationStatus = locationManager.authorizationStatus
+    }
+
+    private func setupLocationManager() {
+        locationManager.delegate = self
+
+        // Fixed configuration (removed dynamic power mode switching)
+        locationManager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        locationManager.distanceFilter = 10
+
+        // Allow system to pause updates to save battery when stationary
+        locationManager.pausesLocationUpdatesAutomatically = true
+
+        // Only enable background updates if the app has the capability
+        // This prevents crashes in test environments where UIBackgroundModes is not set
+        if Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") != nil {
+            locationManager.allowsBackgroundLocationUpdates = true
+        }
+    }
+
+    // MARK: - Authorization
+
+    /// Requests permission to access location data.
+    ///
+    /// This method triggers the system permission prompt for "Always" authorization.
+    func requestAuthorization() {
+        locationManager.requestAlwaysAuthorization()
+    }
+
+    // MARK: - Collection Control
+
+    /// Starts location updates.
+    ///
+    /// If authorization is not yet granted, this method will request it.
+    func start() {
+        if authorizationStatus != .authorizedAlways && authorizationStatus != .authorizedWhenInUse {
+            log.warning("Location permission not authorized. Requesting access...")
+            requestAuthorization()
+            return
+        }
+
+        guard !isCollecting else {
+            log.notice("Location updates are already active.")
+            return
+        }
+
+        log.info("Starting location updates.")
+        locationManager.startUpdatingLocation()
+        isCollecting = true
+    }
+
+    /// Stops location updates.
+    func stop() {
+        guard isCollecting else {
+            log.notice("Location updates are already stopped.")
+            return
+        }
+
+        log.info("Stopping location updates.")
+        locationManager.stopUpdatingLocation()
+        isCollecting = false
+    }
+}
+
+// MARK: - CLLocationManagerDelegate
+extension LocationDataCollector: @MainActor CLLocationManagerDelegate {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else {
+            log.notice("Received empty location update.")
+            return
+        }
+
+        // Check if this is the first update (lastLocation is effectively uninitialized at 0,0)
+        if lastLocation.coordinate.latitude == 0 && lastLocation.coordinate.longitude == 0 {
+            lastLocation = location
+            startLocation = location
+            // Do not add distance for the initial fix or we get distance from (0,0)
+        } else {
+            totalDistance += location.distance(from: lastLocation)
+            lastLocation = location
+        }
+
+        _locationContinuation.yield(location)
+    }
+
+    func locationManager(
+        _ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus
+    ) {
+        log.info("Authorization status \(manager.authorizationStatus.rawValue)")
+        authorizationStatus = status
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        authorizationStatus = manager.authorizationStatus
+        log.info("Authorization status changed: \(manager.authorizationStatus.rawValue)")
+    }
+
+    func locationManagerDidPauseLocationUpdates(_ manager: CLLocationManager) {
+        log.notice("Location updates paused.")
+    }
+
+    func locationManagerDidResumeLocationUpdates(_ manager: CLLocationManager) {
+        log.notice("Location updates resumed.")
+    }
+
+    func locationManager(
+        _ manager: CLLocationManager, didFinishDeferredUpdatesWithError error: (any Error)?
+    ) {
+        log.notice("Finished deferred updates with error: \(String(describing: error)).")
+    }
+}
