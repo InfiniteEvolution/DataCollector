@@ -2,7 +2,7 @@
 //  SensorDataBatcher.swift
 //  DataCollector
 //
-//  Created by Antigravity on 04/12/25.
+//  Created by Sijo on 04/12/25.
 //
 
 import Foundation

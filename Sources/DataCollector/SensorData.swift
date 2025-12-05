@@ -2,7 +2,7 @@
 //  SensorData.swift
 //  DataCollector
 //
-//  Created by Antigravity on 30/11/25.
+//  Created by Sijo on 30/11/25.
 //
 
 import CoreLocation

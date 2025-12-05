@@ -2,7 +2,7 @@
 //  SensorDataTests.swift
 //  DataCollectorTests
 //
-//  Created by Antigravity on 05/12/25.
+//  Created by Sijo on 05/12/25.
 //
 
 import CoreMotion
