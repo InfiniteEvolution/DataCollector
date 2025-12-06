@@ -3,7 +3,7 @@
 //  Package.swift
 //  DataCollector
 //
-//  Created by sijo using AI on 30/11/25.
+//  Created by Sijo using AI on 30/11/25.
 //
 
 import PackageDescription

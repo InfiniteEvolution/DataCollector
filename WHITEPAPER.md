@@ -101,11 +101,11 @@ self.sensorData = uiData
 
 **Implementation**:
 ```swift
-public actor VibePredictor {
+ actor VibePredictor {
     private let model: VibeClassifier?  // CoreML model
     private let calendar = Calendar.current  // Cached
     
-    public func predict(...) -> (vibe: Vibe, probability: Double) {
+     func predict(...) -> (vibe: Vibe, probability: Double) {
         if let model = model {
             // Use ML model (100% accuracy)
             let prediction = try? model.prediction(input: input)
@@ -480,6 +480,8 @@ DataCollector employs **two separate prediction methods** for different purposes
 
 ### 7.1 Implementation
 
+### 8.1 Implementation
+
 **SensorDataCollector.updateSensorData()**:
 ```swift
 private func updateSensorData(activity: CMMotionActivity, location: SensorData.Location? = nil) {
@@ -509,7 +511,7 @@ private func updateSensorData(activity: CMMotionActivity, location: SensorData.L
 }
 ```
 
-### 7.2 Rationale
+### 8.2 Rationale
 
 #### CSV Data Path (VibeEngine)
 - **Purpose**: Training data consistency
@@ -525,7 +527,7 @@ private func updateSensorData(activity: CMMotionActivity, location: SensorData.L
 - **Benefit**: Best possible predictions for users
 - **Performance**: Asynchronous, smooth updates
 
-### 7.3 Data Flow
+### 8.3 Data Flow
 
 ```
 Motion/Location Update
@@ -543,7 +545,7 @@ Motion/Location Update
                           └─▶ sensorData (UI binding)
 ```
 
-### 7.4 Example Output
+### 8.4 Example Output
 
 **Single Sensor Update Creates Two Instances**:
 
@@ -566,7 +568,7 @@ SensorData(
 - Vibe: Focus (same classification)
 - Probability: 0.99 (higher ML confidence)
 
-### 7.5 Benefits
+### 8.5 Benefits
 
 #### Training Consistency ✅
 - CSV contains VibeEngine predictions matching training data

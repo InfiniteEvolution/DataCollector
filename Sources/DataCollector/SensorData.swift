@@ -2,7 +2,7 @@
 //  SensorData.swift
 //  DataCollector
 //
-//  Created by Antigravity on 30/11/25.
+//  Created by Sijo on 30/11/25.
 //
 
 import CoreLocation
@@ -19,7 +19,7 @@ public enum CMActivityType: String, Codable, CaseIterable, Sendable {
     case cycling
     case unknown
 
-    public var id: Int {
+    var id: Int {
         switch self {
         case .stationary: return 0
         case .walking: return 1
@@ -31,11 +31,11 @@ public enum CMActivityType: String, Codable, CaseIterable, Sendable {
     }
 
     // Optimization: Helper properties for cleaner code
-    public var isMoving: Bool {
+    var isMoving: Bool {
         self == .walking || self == .running || self == .cycling || self == .automotive
     }
 
-    public var isHighIntensity: Bool {
+    var isHighIntensity: Bool {
         self == .running || self == .cycling
     }
 }
@@ -51,7 +51,7 @@ public enum Vibe: String, Codable, CaseIterable, Sendable {
     case chill  // Relaxing
     case unknown
 
-    public var id: Int {
+    var id: Int {
         switch self {
         case .sleep: return 0
         case .morningRoutine: return 1
@@ -67,19 +67,6 @@ public enum Vibe: String, Codable, CaseIterable, Sendable {
     public var title: String {
         self.rawValue.capitalized
     }
-
-    public var description: String {
-        switch self {
-        case .sleep: return "Time to rest and recharge."
-        case .morningRoutine: return "Starting the day fresh."
-        case .energetic: return "Moving and grooving!"
-        case .commute: return "On the move."
-        case .focus: return "In the zone."
-        case .meal: return "Fueling up."
-        case .chill: return "Relaxing and unwinding."
-        case .unknown: return "Vibe is a mystery."
-        }
-    }
 }
 
 /// A synchronized snapshot of activity data.
@@ -88,9 +75,6 @@ public enum Vibe: String, Codable, CaseIterable, Sendable {
 /// were captured. It is optimized for storage using short JSON keys.
 public struct SensorData: Codable, Identifiable, Timestampable, CSVEncodable, Sendable {
     // MARK: - ML Predictor
-
-    /// Shared ML-based vibe predictor with VibeEngine fallback
-    static let predictor = VibePredictor()
     /// Unique identifier for this sensor sample.
     public let id: UUID
 
@@ -98,38 +82,52 @@ public struct SensorData: Codable, Identifiable, Timestampable, CSVEncodable, Se
     public let timestamp: Date
 
     /// The total distance traveled in meters.
-    public let distance: Double
+    let distance: Double
 
     /// The detected motion activity type.
-    public let activity: CMActivityType
+    let activity: CMActivityType
 
     /// The start time of the current motion activity.
-    public let startTime: Date
+    let startTime: Date
 
     /// The duration of the current motion activity in seconds.
-    public let duration: TimeInterval
+    let duration: TimeInterval
 
     /// The derived vibe or energy level.
-    public var vibe: Vibe  // Mutable for updating later if needed
+    public internal(set) var vibe: Vibe  // Mutable for updating later if needed
 
     /// The probability/confidence of the vibe (0.0 - 1.0).
-    /// This is the maximum of the rule-based Engine confidence and the ML Model confidence.
-    public var probability: Double
+    ///
+    /// This value represents the system's certainty in the predicted `vibe`.
+    /// It is derived from either the ML model's class probability or the VibeEngine's rule confidence.
+    var probability: Double
+
+    /// The raw confidence reported by CMMotionActivity.
+    let confidence: CMMotionActivityConfidence
+
+    /// The speed of the user in meters per second.
+    let speed: CLLocationSpeed
 
     // MARK: - Initializer
 
-    /// Initializes a new sensor data snapshot.
+    /// Initializes a new sensor data snapshot with synchronous VibeEngine prediction.
+    ///
+    /// This initializer is typically used for the training data path where consistency
+    /// with the rule-based Engine is required.
     ///
     /// - Parameters:
     ///   - motionActivity: The CMMotionActivity sample.
     ///   - location: The location context (current and recent).
-    public init(motionActivity: CMMotionActivity, location: Location) {
+    init(motionActivity: CMMotionActivity, location: Location) {
         self.id = UUID()
         self.timestamp = Date()
         self.startTime = motionActivity.startDate
         self.duration = self.timestamp.timeIntervalSince(self.startTime)
         self.distance = location.distance
-
+        self.confidence = motionActivity.confidence
+        self.speed = location.current.speed
+        self.vibe = .unknown
+        self.probability = .zero
         // Map Activity
         self.activity = {
             switch motionActivity.activityType {
@@ -142,29 +140,6 @@ public struct SensorData: Codable, Identifiable, Timestampable, CSVEncodable, Se
             @unknown default: return .unknown
             }
         }()
-
-        let vibeConfidence: VibeSystem.Confidence = {
-            switch motionActivity.confidence {
-            case .high: return .high
-            case .medium: return .medium
-            case .low: return .low
-            @unknown default: return .low
-            }
-        }()
-
-        // Evaluate Vibe & Probability
-        // Note: Using VibeEngine (rule-based) in synchronous init.
-        // For ML predictions, use SensorData.withMLPrediction() async factory method.
-        let result = VibeSystem.evaluate(
-            motion: motionActivity.activityType,
-            confidence: vibeConfidence,
-            speed: location.current.speed,
-            distance: self.distance,
-            duration: self.duration,
-            timestamp: self.timestamp
-        )
-        self.vibe = result.vibe
-        self.probability = result.probability
     }
 
     // MARK: - CSVEncodable
@@ -211,38 +186,32 @@ public struct SensorData: Codable, Identifiable, Timestampable, CSVEncodable, Se
     // MARK: - Integration
 
     /// Encapsulates location data for sensor readings.
-    public struct Location: Sendable {
-        public let current: CLLocation
-        public let recent: CLLocation
+    struct Location: Sendable {
+        let current: CLLocation
+        let recent: CLLocation
 
-        public init(current: CLLocation, recent: CLLocation) {
+        init(current: CLLocation, recent: CLLocation) {
             self.current = current
             self.recent = recent
         }
 
-        public var distance: Double {
+        var distance: Double {
             current.distance(from: recent)
         }
     }
 
     // Internal init for testing
-    internal init(
-        distance: Double = 0.0,
-        activity: CMActivityType = .unknown,
-        startTime: Date = Date(),
-        vibe: Vibe = .unknown,
-        probability: Double = 0.0,
-        id: UUID = UUID(),
-        timestamp: Date = Date()
-    ) {
-        self.id = id
-        self.timestamp = timestamp
-        self.distance = distance
-        self.activity = activity
-        self.startTime = startTime
-        self.duration = timestamp.timeIntervalSince(startTime)
-        self.vibe = vibe
-        self.probability = probability
+    init() {
+        self.id = UUID()
+        self.timestamp = Date()
+        self.distance = .zero
+        self.activity = .unknown
+        self.startTime = .now
+        self.duration = Date().timeIntervalSince(startTime)
+        self.vibe = .unknown
+        self.probability = .zero
+        self.confidence = .low
+        self.speed = .zero
     }
 }
 
@@ -258,3 +227,5 @@ extension CMMotionActivity {
         return .unknown
     }
 }
+
+extension CMMotionActivityConfidence: @retroactive Codable {}

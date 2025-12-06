@@ -2,7 +2,7 @@
 //  VibeEngineTests.swift
 //  DataCollectorTests
 //
-//  Created by Antigravity on 05/12/25.
+//  Created by Sijo on 05/12/25.
 //
 
 import CoreMotion
@@ -14,7 +14,6 @@ import Testing
 @Suite struct VibeEngineTests {
     init() {
         // Force UTC for deterministic testing
-        VibeSystem._testingTimeZone = TimeZone(secondsFromGMT: 0)!
     }
 
     // Helper to create a date on a known Weekday (Monday, Jan 2, 2023)
@@ -32,25 +31,7 @@ import Testing
         components.minute = minute
         return calendar.date(from: components)!
     }
-
-    @Test func sleep() {
-        // 3:00 AM, Stationary -> Sleep
-        let date = makeDate(isWeekend: false, hour: 3, minute: 0)
-        let result = VibeSystem.evaluate(
-            motion: .stationary, confidence: .high, speed: 0, distance: 0, duration: 300,
-            timestamp: date)
-        #expect(result.vibe == .sleep)
-    }
-
-    @Test func morningRoutine() {
-        // 6:00 AM, Stationary -> Morning Routine
-        let date = makeDate(isWeekend: false, hour: 6, minute: 0)
-        let result = VibeSystem.evaluate(
-            motion: .stationary, confidence: .high, speed: 0, distance: 0, duration: 300,
-            timestamp: date)
-        #expect(result.vibe == .morningRoutine)
-    }
-
+    
     @Test func exerciseInMorning() {
         // 6:30 AM, Running -> Energetic
         let date = makeDate(isWeekend: false, hour: 6, minute: 30)

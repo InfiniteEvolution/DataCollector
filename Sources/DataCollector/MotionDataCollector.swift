@@ -2,7 +2,7 @@
 //  MotionDataCollector.swift
 //  DataCollector
 //
-//  Created by Antigravity on 04/12/25.
+//  Created by Sijo on 04/12/25.
 //
 
 import CoreMotion
@@ -11,22 +11,28 @@ import Logger
 
 // CMMotionActivity is effectively immutable but pre-dates Sendable.
 // We wrap it in an unchecked Sendable container to pass through AsyncStream.
-public struct UncheckedSendable<T>: @unchecked Sendable {
-    public let value: T
-    public init(_ value: T) {
+struct UncheckedSendable<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) {
         self.value = value
     }
 }
 
-@Observable
+/// A wrapper around `CMMotionActivityManager` that provides an async stream of activity updates.
+///
+/// `MotionDataCollector` manages the authorization status and lifecycle of motion updates.
+/// It exposes a stream of `UncheckedSendable<CMMotionActivity>` to allow safe passing of
+/// activity objects across concurrency boundaries (as `CMMotionActivity` is not yet Sendable
+/// but is effectively immutable).
 @MainActor
 final class MotionDataCollector {
+    private let log = LogContext("MDAT")
     /// A stream of raw CMMotionActivity updates.
-    public var rawActivityUpdates: AsyncStream<UncheckedSendable<CMMotionActivity>> {
+    var rawActivityUpdates: AsyncStream<UncheckedSendable<CMMotionActivity>> {
         _rawActivityStream
     }
 
-    public private(set) var currentActivity: CMMotionActivity?
+    private(set) var currentActivity: CMMotionActivity = .init()
 
     private let (_rawActivityStream, _rawActivityContinuation) = AsyncStream<
         UncheckedSendable<CMMotionActivity>
@@ -37,10 +43,11 @@ final class MotionDataCollector {
         CMMotionActivityManager.authorizationStatus()
     private let motionActivityManager = CMMotionActivityManager()
 
-    private let log = LogContext("MDAT")
     private var isCollecting = false
 
-    public init() {}
+    init() {
+        log.inited()
+    }
 
     // MARK: - Authorization
 
@@ -64,6 +71,8 @@ final class MotionDataCollector {
         authorizationStatus = CMMotionActivityManager.authorizationStatus()
         if authorizationStatus == .authorized {
             start()
+        } else {
+            log.notice("Motion permission not granted.")
         }
     }
 
@@ -111,5 +120,9 @@ final class MotionDataCollector {
     private func updateActivity(_ activity: CMMotionActivity) {
         self.currentActivity = activity
         _rawActivityContinuation.yield(UncheckedSendable(activity))
+    }
+
+    deinit {
+        log.deinited()
     }
 }

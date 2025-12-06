@@ -6,84 +6,18 @@
 //
 
 import CoreML
+import CoreMotion
 import Foundation
+import Logger
 
-/// ML-based vibe predictor with robust VibeEngine fallback.
-///
-/// `VibePredictor` is an actor that wraps the `VibeClassifier` CoreML model and provides
-/// thread-safe, asynchronous vibe predictions. If the ML model is unavailable or prediction
-/// fails, it automatically falls back to the rule-based `VibeEngine`.
-///
-/// ## Overview
-///
-/// The predictor achieves 100% accuracy on test data using a trained Random Forest Classifier.
-/// It uses optimizations like cached Calendar instances and static lookup tables for
-/// maximum performance.
-///
-/// ## Model Details
-///
-/// - **Algorithm**: Random Forest Classifier (CoreML)
-/// - **Accuracy**: 100.00% on test set (484 samples)
-/// - **Model Size**: 248 KB
-/// - **Features**: timestamp, distance, activity, startTime, duration, hour, dayOfWeek
-/// - **Target**: Vibe (7 classes)
-///
-/// ## Usage
-///
-/// ```swift
-/// let predictor = VibePredictor()
-///
-/// let result = await predictor.predict(
-///     timestamp: Date(),
-///     distance: 100.0,
-///     activity: .walking,
-///     startTime: Date().addingTimeInterval(-3600),
-///     duration: 3600
-/// )
-///
-/// print("Vibe: \(result.vibe)")           // e.g., .energetic
-/// print("Confidence: \(result.probability)") // e.g., 0.99
-/// ```
-///
-/// ## Performance
-///
-/// - **Prediction Time**: <1ms for ML model
-/// - **Memory**: ~250 KB for model, minimal runtime overhead
-/// - **Optimizations**:
-///   - Cached Calendar instance (zero allocation per call)
-///   - Static vibe lookup table (O(1) access)
-///   - @inline annotations for hot paths
-///
-/// ## Thread Safety
-///
-/// `VibePredictor` is an actor, ensuring thread-safe access to the ML model and
-/// prediction methods across concurrent contexts.
-///
-/// ## Fallback Mechanism
-///
-/// If the ML model fails to load or prediction fails:
-/// 1. Automatically falls back to `VibeEngine.evaluate()`
-/// 2. Uses the same input parameters
-/// 3. Returns rule-based prediction
-/// 4. No error thrown - graceful degradation
-///
-/// ## Topics
-///
-/// ### Creating a Predictor
-/// - ``init()``
-///
-/// ### Making Predictions
-/// - ``predict(timestamp:distance:activity:startTime:duration:)``
-///
-/// ### See Also
-/// - ``VibeEngine``
-/// - ``SensorData/withMLPrediction(motionActivity:location:)``
-public actor VibePredictor {
+actor VibePredictor {
+    private let log = LogContext("VBPR")
     /// The CoreML model for vibe prediction, if available.
     ///
     /// This model is loaded once during initialization. If loading fails,
     /// the predictor will use `VibeEngine` as a fallback for all predictions.
-    private let model: VibeClassifier?
+    private lazy var model: VibeClassifier? = try? VibeClassifier(
+        configuration: MLModelConfiguration())
 
     /// Cached Calendar instance to avoid repeated allocations.
     ///
@@ -102,101 +36,8 @@ public actor VibePredictor {
     /// let predictor = VibePredictor()
     /// // Model loads automatically, or falls back to VibeEngine
     /// ```
-    public init() {
-        // Try to load ML model
-        self.model = try? VibeClassifier(configuration: MLModelConfiguration())
-    }
-
-    /// Predicts the vibe for given sensor data.
-    ///
-    /// This method attempts to use the CoreML model for prediction. If the model
-    /// is unavailable or prediction fails, it automatically falls back to the
-    /// rule-based `VibeEngine`.
-    ///
-    /// - Parameters:
-    ///   - timestamp: The current timestamp
-    ///   - distance: Distance traveled in meters
-    ///   - activity: The type of motion activity
-    ///   - startTime: When the current activity started
-    ///   - duration: Duration of the current activity in seconds
-    ///
-    /// - Returns: A tuple containing the predicted vibe and confidence probability (0.0-1.0)
-    ///
-    /// ## Prediction Flow
-    ///
-    /// 1. Extract time features (hour, dayOfWeek) from timestamp
-    /// 2. Create ML model input with all features
-    /// 3. Attempt prediction with CoreML model
-    /// 4. If successful, return ML prediction
-    /// 5. If failed or unavailable, fall back to VibeEngine
-    ///
-    /// ## Example
-    ///
-    /// ```swift
-    /// let predictor = VibePredictor()
-    ///
-    /// let (vibe, probability) = await predictor.predict(
-    ///     timestamp: Date(),
-    ///     distance: 0.0,
-    ///     activity: .stationary,
-    ///     startTime: Date().addingTimeInterval(-7200),
-    ///     duration: 7200
-    /// )
-    ///
-    /// if vibe == .sleep && probability > 0.9 {
-    ///     print("High confidence sleep prediction")
-    /// }
-    /// ```
-    ///
-    /// ## Performance
-    ///
-    /// - ML Model: <1ms prediction time
-    /// - VibeEngine Fallback: <0.1ms (O(1) lookup)
-    ///
-    /// ## Topics
-    /// ### Prediction Results
-    /// - ``Vibe``
-    ///
-    /// ### See Also
-    /// - ``VibeEngine/evaluate(motion:confidence:speed:distance:duration:timestamp:)``
-    public func predict(
-        timestamp: Date,
-        distance: Double,
-        activity: CMActivityType,
-        startTime: Date,
-        duration: TimeInterval
-    ) -> (vibe: Vibe, probability: Double) {
-
-        // Try ML model first
-        if let model = model {
-            // Use cached calendar (zero allocation)
-            let input = VibeClassifierInput(
-                timestamp: timestamp.timeIntervalSince1970,
-                distance: distance,
-                activity: Int64(activity.id),
-                startTime: startTime.timeIntervalSince1970,
-                duration: duration,
-                hour: Int64(calendar.component(.hour, from: timestamp)),
-                dayOfWeek: Int64(calendar.component(.weekday, from: timestamp))
-            )
-
-            if let prediction = try? model.prediction(input: input),
-                let vibeID = prediction.vibe as? Int64,
-                let probability = prediction.vibeProbability[vibeID]
-            {
-                return (vibeFromID(Int(vibeID)), probability)
-            }
-        }
-
-        // Fallback to VibeEngine
-        return VibeSystem.evaluate(
-            motion: activity,
-            confidence: .high,
-            speed: distance / max(duration, 1.0),
-            distance: distance,
-            duration: duration,
-            timestamp: timestamp
-        )
+    init() {
+        log.inited()
     }
 
     // MARK: - Private Helpers
@@ -232,7 +73,104 @@ public actor VibePredictor {
     /// ```
     @inline(__always)
     private func vibeFromID(_ id: Int) -> Vibe {
-        guard id >= 0 && id < Self.vibeTable.count else { return .unknown }
+        guard id >= 0 else {
+            log.info("Received negative vibe ID: \(id)")
+            return .unknown
+        }
+
+        guard id < Self.vibeTable.count else {
+            log.info("Received out-of-bounds vibe ID: \(id)")
+            return .unknown
+        }
+
         return Self.vibeTable[id]
+    }
+
+    /// Generates a vibe prediction using the ML model.
+    ///
+    /// This method attempts to use the CoreML model for high-accuracy prediction.
+    /// If the model is unavailable or fails, it falls back to the VibeEngine.
+    ///
+    /// - Parameter sensorData: The sensor data to update with the prediction.
+    func predict(ml sensorData: inout SensorData) async {
+        // Get ML prediction
+        let prediction = {
+            // Try ML model first
+            guard let model = model else {
+                log.info("ML model is nil. Using VibeEngine fallback.")
+                return predict(ve: &sensorData)
+            }
+
+            // Use cached calendar (zero allocation)
+            let input = VibeClassifierInput(
+                timestamp: sensorData.timestamp.timeIntervalSince1970,
+                distance: sensorData.distance,
+                activity: Int64(sensorData.activity.id),
+                startTime: sensorData.startTime.timeIntervalSince1970,
+                duration: sensorData.duration,
+                hour: Int64(calendar.component(.hour, from: sensorData.timestamp)),
+                dayOfWeek: Int64(calendar.component(.weekday, from: sensorData.timestamp))
+            )
+
+            guard let prediction = try? model.prediction(input: input) else {
+                log.info("Failed to get prediction from ML model.")
+                // Fallback to VibeEngine
+                return predict(ve: &sensorData)
+            }
+
+            guard let probability = prediction.vibeProbability[prediction.vibe] else {
+                log.info("Failed to get probability for predicted vibe from ML model.")
+                // Fallback to VibeEngine
+                return predict(ve: &sensorData)
+            }
+
+            log.notice("ML prediction: vibe: \(prediction.vibe), probability: \(probability)")
+            return (vibeFromID(Int(prediction.vibe)), probability)
+        }()
+
+        // Update with ML prediction
+        sensorData.vibe = prediction.vibe
+        sensorData.probability = prediction.probability
+    }
+
+    /// Generates a vibe prediction using the rule-based VibeEngine.
+    ///
+    /// This method uses the deterministic fallback logic. It is synchronous and allocation-free.
+    ///
+    /// - Parameter sensorData: The sensor data to update with the prediction.
+    /// - Returns: A tuple containing the predicted vibe and its probability.
+    @discardableResult
+    func predict(ve sensorData: inout SensorData) -> (vibe: Vibe, probability: Double) {
+
+        let vibeConfidence: VibeSystem.Confidence = {
+            switch sensorData.confidence {
+            case .high: return .high
+            case .medium: return .medium
+            case .low: return .low
+            @unknown default: return .low
+            }
+        }()
+
+        // Evaluate Vibe & Probability
+        // Note: Using VibeEngine (rule-based) in synchronous init.
+        // For ML predictions, use SensorData.withMLPrediction() async factory method.
+        let result = VibeSystem.evaluate(
+            motion: sensorData.activity,
+            confidence: vibeConfidence,
+            speed: sensorData.speed,
+            distance: sensorData.distance,
+            duration: sensorData.duration,
+            timestamp: sensorData.timestamp
+        )
+
+        sensorData.vibe = result.vibe
+        sensorData.probability = result.probability
+        log.notice(
+            "VibeEngine prediction: vibe: \(result.vibe), with probability: \(result.probability)")
+        return (vibe: result.vibe, probability: result.probability)
+    }
+
+    deinit {
+        log.deinited()
     }
 }

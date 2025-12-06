@@ -2,7 +2,7 @@
 //  SensorDataBatcher.swift
 //  DataCollector
 //
-//  Created by Antigravity on 04/12/25.
+//  Created by Sijo on 04/12/25.
 //
 
 import Foundation
@@ -25,7 +25,9 @@ actor SensorDataBatcher {
     /// The maximum number of items to hold in the buffer before triggering a save.
     private let batchSizeLimit: Int
     /// The maximum time interval to hold data in the buffer before triggering a save.
+    /// The maximum time interval to hold data in the buffer before triggering a save.
     private let batchTimeLimit: TimeInterval
+
     /// The timestamp of the last successful save operation.
     private var lastSaveTime = Date()
 
@@ -40,6 +42,7 @@ actor SensorDataBatcher {
         batchSizeLimit = batchSize
         batchTimeLimit = batchInterval
         buffer.reserveCapacity(batchSize)  // Optimization: Pre-allocate capacity
+        log.inited()
     }
 
     /// Adds a new data point to the buffer.
@@ -50,9 +53,12 @@ actor SensorDataBatcher {
     func append(_ data: SensorData) async {
         buffer.append(data)
 
-        if buffer.count >= batchSizeLimit {
-            await persistBufferedData()
+        guard buffer.count >= batchSizeLimit else {
+            log.info("batchSizeLimit not reached, \(buffer.count) | \(batchSizeLimit).")
+            return
         }
+
+        await persistBufferedData()
     }
 
     /// Checks if the buffer should be flushed based on the time elapsed since the last save.
@@ -61,9 +67,18 @@ actor SensorDataBatcher {
     /// for too long without being written to disk.
     func flushIfNecessary() async {
         let timeSinceLastSave = Date().timeIntervalSince(lastSaveTime)
-        if !buffer.isEmpty && timeSinceLastSave >= batchTimeLimit {
-            await persistBufferedData()
+
+        guard !buffer.isEmpty else {
+            log.info("Buffer is empty, no need to flush.")
+            return
         }
+
+        guard timeSinceLastSave >= batchTimeLimit else {
+            log.info("Flush not needed, time not exceeded. \(buffer.count) | \(batchSizeLimit).")
+            return
+        }
+
+        await persistBufferedData()
     }
 
     /// Forces the buffer to be saved to disk immediately.
@@ -79,7 +94,10 @@ actor SensorDataBatcher {
     /// This method handles the actual interaction with the `Store` and manages the
     /// buffer state (clearing it after a successful hand-off).
     private func persistBufferedData() async {
-        guard !buffer.isEmpty else { return }
+        guard !buffer.isEmpty else {
+            log.info("No data to save, buffer is empty.")
+            return
+        }
 
         // Capture the buffer and clear it immediately to be ready for new data
         let dataToSave = buffer
@@ -92,7 +110,11 @@ actor SensorDataBatcher {
             try await store.save(dataToSave)
             log.debug("Successfully saved batch of \(dataToSave.count) items.")
         } catch {
-            log.error("Failed to save sensor data batch: \(error)")
+            log.error("Failed to save sensor data batch: \(error.localizedDescription)")
         }
+    }
+
+    deinit {
+        log.deinited()
     }
 }

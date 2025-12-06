@@ -2,7 +2,7 @@
 //  SensorDataCollector.swift
 //  DataCollector
 //
-//  Created by Antigravity on 30/11/25.
+//  Created by Sijo on 30/11/25.
 //
 
 import CoreLocation
@@ -24,6 +24,8 @@ import Trainer
 public final class SensorDataCollector {
     // MARK: - Properties
 
+    private let log = LogContext("SDCR")
+
     /// The most recent sensor data snapshot.
     public private(set) var sensorData: SensorData
 
@@ -32,15 +34,17 @@ public final class SensorDataCollector {
     private let locationCollector = LocationDataCollector()
 
     // Dependencies
-    public let store: Store<SensorData>
-    public let trainer: OnDeviceTrainer
+    let store: Store<SensorData>
+    let trainer: OnDeviceTrainer
 
     // Batcher
     private let batcher: SensorDataBatcher
 
     // State
-    private var previousLocation: CLLocation?
+    private var previousLocation: CLLocation = .init(latitude: .zero, longitude: .zero)
     private var tasks: [Task<Void, Never>] = []
+
+    private let vibePredictor = VibePredictor()
 
     // MARK: - Initialization
 
@@ -48,14 +52,18 @@ public final class SensorDataCollector {
     ///
     /// This initializer acts as the composition root for the Data/Training subsystem.
     /// - Parameter store: Optional store for testing injection. If nil, default dependencies are created.
-    public init(store: Store<SensorData>? = nil) {
+    convenience init() {
+        self.init(store: nil)
+    }
+    
+    init(store: Store<SensorData>? = nil) {
         // 1. Composition Root: Initialize Dependencies
         let fs = FileSystem(.custom("CanvasData"))
         let csv = CSVStore(fileSystem: fs)
         let models = ModelStore(name: "VibeClassifier", fileSystem: fs)
 
         // Use injected store or create default
-        let actualStore = store ?? Store<SensorData>(csvStore: csv)
+        let actualStore = Store<SensorData>(csvStore: csv)
         let trainer = OnDeviceTrainer(modelStore: models, csvStore: csv)
 
         self.store = actualStore
@@ -72,22 +80,21 @@ public final class SensorDataCollector {
                 updateSensorData(activity: activity.value)
             }
         }
+
         tasks.append(motionTask)
 
         // Subscribe to Location Updates
         let locationTask = Task { [weak self] in
             guard let self else { return }
+
             for await location in locationCollector.locationUpdates {
                 // Track location history for delta calculation
-                let recent = previousLocation ?? location
+                let recent = previousLocation
                 let locStruct = SensorData.Location(current: location, recent: recent)
 
                 // When location updates, we use the latest known motion data
-                if let lastActivity = motionCollector.currentActivity {
-                    updateSensorData(activity: lastActivity, location: locStruct)
-                }
-
-                self.previousLocation = location
+                updateSensorData(activity: motionCollector.currentActivity, location: locStruct)
+                previousLocation = location
             }
         }
         tasks.append(locationTask)
@@ -100,11 +107,15 @@ public final class SensorDataCollector {
                 await batcher.flushIfNecessary()
             }
         }
+
         tasks.append(timerTask)
+
+        log.inited()
     }
 
     @MainActor deinit {
         stop()
+        log.deinited()
     }
 
     private func updateSensorData(activity: CMMotionActivity, location: SensorData.Location? = nil)
@@ -115,40 +126,28 @@ public final class SensorDataCollector {
             locStruct = location
         } else {
             let current = locationCollector.lastLocation
-            let recent = previousLocation ?? current
+            let recent = previousLocation
             locStruct = SensorData.Location(current: current, recent: recent)
         }
 
         // Dual prediction strategy:
-        // 1. VibeEngine prediction for CSV/training data (synchronous)
-        let csvData = SensorData(
-            motionActivity: activity,
-            location: locStruct
-        )
-
-        // Send to batcher for CSV writing (uses VibeEngine prediction)
         Task {
-            await batcher.append(csvData)
-        }
+            // 1. VibeEngine prediction for CSV/training data (synchronous)
+            var sensorData = SensorData(motionActivity: activity, location: locStruct)
+            await vibePredictor.predict(ve: &sensorData)
 
-        // 2. ML prediction for UI display (asynchronous, 100% accuracy)
-        Task {
-            let uiData = await SensorData.withMLPrediction(
-                motionActivity: activity,
-                location: locStruct
-            )
+            // Send to batcher for CSV writing (uses VibeEngine prediction)
+            await batcher.append(sensorData)
+
+            // 2. ML prediction for UI display (asynchronous, 100% accuracy)
+            await vibePredictor.predict(ml: &sensorData)
+
             // Update UI with ML prediction
-            self.sensorData = uiData
+            self.sensorData = sensorData
         }
     }
 
-    private func commit(_ data: SensorData) {
-        // Deprecated: No longer used
-        // Kept for backward compatibility
-        self.sensorData = data
-    }
-
-    // MARK: - Public API
+    // MARK: -  API
 
     /// Requests authorization for all underlying sensors and starts collection.
     ///
@@ -159,14 +158,22 @@ public final class SensorDataCollector {
         locationCollector.requestAuthorization()
     }
 
-    /// Alias for `requestAuthorization` to align with common naming conventions.
+    /// Requests authorization for all underlying sensors and starts collection.
+    ///
+    /// This method triggers necessary permission prompts for Motion and Location access.
+    /// It effectively starts the data collection pipeline.
+    ///
+    /// - Note: This is an alias for `requestAuthorization` to align with common API patterns.
     public func start() {
         requestAuthorization()
         motionCollector.start()
         locationCollector.start()
     }
 
-    /// Stops data collection.
+    /// Stops all data collection and cancels pending tasks.
+    ///
+    /// This method should be called when the collector is no longer needed to free up resources
+    /// and stop sensor updates.
     public func stop() {
         motionCollector.stop()
         locationCollector.stop()
@@ -176,11 +183,11 @@ public final class SensorDataCollector {
 
     /// Forces a flush of the data buffer to disk.
     ///
-    /// Call this when the app is about to enter the background to ensure no data is lost.
-    public func flush() {
+    /// Call this method when the application is about to enter the background or terminate
+    /// to ensure that all buffered data is safely persisted to the store.
+    func flush() {
         Task {
             await batcher.flush()
         }
     }
-
 }

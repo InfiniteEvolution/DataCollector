@@ -2,20 +2,23 @@
 //  LocationDataCollector.swift
 //  DataCollector
 //
-//  Created by Antigravity on 04/12/25.
+//  Created by Sijo on 04/12/25.
 //
 
 import CoreLocation
 import Foundation
 import Logger
 
-@Observable
 @MainActor
 final class LocationDataCollector: NSObject {
+    /// The last known location.
+    ///
+    /// This property is updated on the Main Actor whenever a new location is received.
+    /// It defaults to a zero coordinate if no location has been received yet.
     private(set) var lastLocation: CLLocation = .init(latitude: 0, longitude: 0)
 
     /// A stream of location updates.
-    public var locationUpdates: AsyncStream<CLLocation> {
+    var locationUpdates: AsyncStream<CLLocation> {
         _locationStream
     }
 
@@ -40,10 +43,15 @@ final class LocationDataCollector: NSObject {
     private let log = LogContext("LDAT")
     private var isCollecting = false
 
-    public override init() {
+    /// Initializes a new location collector.
+    ///
+    /// This initializer configures the `CLLocationManager` with settings optimized for battery life,
+    /// such as a 10-meter distance filter and `.fitness` activity type.
+    override init() {
         super.init()
         setupLocationManager()
         authorizationStatus = locationManager.authorizationStatus
+        log.inited()
     }
 
     private func setupLocationManager() {
@@ -112,6 +120,10 @@ final class LocationDataCollector: NSObject {
         log.info("Stopping location updates.")
         locationManager.stopUpdatingLocation()
         isCollecting = false
+    }
+
+    deinit {
+        log.deinited()
     }
 }
 
