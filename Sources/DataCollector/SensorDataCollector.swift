@@ -52,10 +52,10 @@ public final class SensorDataCollector {
     ///
     /// This initializer acts as the composition root for the Data/Training subsystem.
     /// - Parameter store: Optional store for testing injection. If nil, default dependencies are created.
-    convenience init() {
+    public convenience init() {
         self.init(store: nil)
     }
-    
+
     init(store: Store<SensorData>? = nil) {
         // 1. Composition Root: Initialize Dependencies
         let fs = FileSystem(.custom("CanvasData"))

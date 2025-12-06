@@ -11,7 +11,7 @@ import Foundation
 import Store
 
 // Custom enum to map CMMotionActivity since CMActivityType doesn't exist in SDK
-public enum CMActivityType: String, Codable, CaseIterable, Sendable {
+enum CMActivityType: String, Codable, CaseIterable, Sendable {
     case stationary
     case walking
     case running
