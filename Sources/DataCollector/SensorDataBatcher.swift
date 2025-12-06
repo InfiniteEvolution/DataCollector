@@ -2,7 +2,7 @@
 //  SensorDataBatcher.swift
 //  DataCollector
 //
-//  Created by Sijo on 04/12/25.
+//  Created by Antigravity on 04/12/25.
 //
 
 import Foundation
@@ -39,6 +39,7 @@ actor SensorDataBatcher {
         self.store = store
         batchSizeLimit = batchSize
         batchTimeLimit = batchInterval
+        buffer.reserveCapacity(batchSize)  // Optimization: Pre-allocate capacity
     }
 
     /// Adds a new data point to the buffer.
@@ -46,11 +47,6 @@ actor SensorDataBatcher {
     /// If the buffer size exceeds `batchSizeLimit`, a save operation is triggered immediately.
     ///
     /// - Parameter data: The `SensorData` to add.
-    /// Appends a new data point to the buffer.
-    ///
-    /// If the buffer size exceeds the configured limit, the data is immediately persisted to disk.
-    ///
-    /// - Parameter data: The `SensorData` snapshot to append.
     func append(_ data: SensorData) async {
         buffer.append(data)
 

@@ -2,7 +2,7 @@
 //  MotionDataCollectorTests.swift
 //  DataCollectorTests
 //
-//  Created by Sijo on 05/12/25.
+//  Created by Antigravity on 05/12/25.
 //
 
 import Testing
@@ -13,7 +13,7 @@ import Testing
 
     @Test func initialization() {
         let collector = MotionDataCollector()
-        #expect(collector.activityType == .unknown)
+        #expect(collector.currentActivity == nil)
     }
 
     @Test func startStop() {

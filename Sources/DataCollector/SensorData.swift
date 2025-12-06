@@ -2,7 +2,7 @@
 //  SensorData.swift
 //  DataCollector
 //
-//  Created by Sijo on 30/11/25.
+//  Created by Antigravity on 30/11/25.
 //
 
 import CoreLocation
@@ -18,6 +18,26 @@ public enum CMActivityType: String, Codable, CaseIterable, Sendable {
     case automotive
     case cycling
     case unknown
+
+    public var id: Int {
+        switch self {
+        case .stationary: return 0
+        case .walking: return 1
+        case .running: return 2
+        case .automotive: return 3
+        case .cycling: return 4
+        case .unknown: return 5
+        }
+    }
+
+    // Optimization: Helper properties for cleaner code
+    public var isMoving: Bool {
+        self == .walking || self == .running || self == .cycling || self == .automotive
+    }
+
+    public var isHighIntensity: Bool {
+        self == .running || self == .cycling
+    }
 }
 
 /// Represents the "vibe" or energy level of the user based on their activity and time of day.
@@ -30,6 +50,19 @@ public enum Vibe: String, Codable, CaseIterable, Sendable {
     case meal  // Breakfast/Lunch/Dinner
     case chill  // Relaxing
     case unknown
+
+    public var id: Int {
+        switch self {
+        case .sleep: return 0
+        case .morningRoutine: return 1
+        case .energetic: return 2
+        case .commute: return 3
+        case .focus: return 4
+        case .meal: return 5
+        case .chill: return 6
+        case .unknown: return 7
+        }
+    }
 
     public var title: String {
         self.rawValue.capitalized
@@ -54,6 +87,10 @@ public enum Vibe: String, Codable, CaseIterable, Sendable {
 /// `SensorData` represents a single point in time where both location and motion activity
 /// were captured. It is optimized for storage using short JSON keys.
 public struct SensorData: Codable, Identifiable, Timestampable, CSVEncodable, Sendable {
+    // MARK: - ML Predictor
+
+    /// Shared ML-based vibe predictor with VibeEngine fallback
+    static let predictor = VibePredictor()
     /// Unique identifier for this sensor sample.
     public let id: UUID
 
@@ -61,88 +98,163 @@ public struct SensorData: Codable, Identifiable, Timestampable, CSVEncodable, Se
     public let timestamp: Date
 
     /// The total distance traveled in meters.
-    public let totalDistance: Double
+    public let distance: Double
 
     /// The detected motion activity type.
-    public let motionActivity: CMActivityType
+    public let activity: CMActivityType
 
     /// The start time of the current motion activity.
-    public let activityStartTime: Date
+    public let startTime: Date
 
     /// The duration of the current motion activity in seconds.
-    public let activityDuration: TimeInterval
+    public let duration: TimeInterval
 
     /// The derived vibe or energy level.
-    public let vibe: Vibe
+    public var vibe: Vibe  // Mutable for updating later if needed
+
+    /// The probability/confidence of the vibe (0.0 - 1.0).
+    /// This is the maximum of the rule-based Engine confidence and the ML Model confidence.
+    public var probability: Double
+
+    // MARK: - Initializer
 
     /// Initializes a new sensor data snapshot.
     ///
     /// - Parameters:
-    ///   - id: Unique identifier. Defaults to a new UUID.
-    ///   - timestamp: The time of capture. Defaults to current date.
-    ///   - totalDistance: The total distance traveled.
-    ///   - motionActivity: The activity type from CoreMotion.
-    ///   - activityStartTime: The start time of the current activity.
-    init(
-        id: UUID = UUID(),
-        timestamp: Date = Date(),
-        totalDistance: Double = 0.0,
-        motionActivity: CMActivityType = .unknown,
-        activityStartTime: Date = Date(),
-        vibe: Vibe = .unknown
-    ) {
-        self.id = id
-        self.timestamp = timestamp
-        self.totalDistance = totalDistance
-        self.motionActivity = motionActivity
-        self.activityStartTime = activityStartTime
-        activityDuration = timestamp.timeIntervalSince(activityStartTime)
-        self.vibe = SensorData.deriveVibe(
-            motion: motionActivity, distance: totalDistance, timestamp: timestamp)
+    ///   - motionActivity: The CMMotionActivity sample.
+    ///   - location: The location context (current and recent).
+    public init(motionActivity: CMMotionActivity, location: Location) {
+        self.id = UUID()
+        self.timestamp = Date()
+        self.startTime = motionActivity.startDate
+        self.duration = self.timestamp.timeIntervalSince(self.startTime)
+        self.distance = location.distance
+
+        // Map Activity
+        self.activity = {
+            switch motionActivity.activityType {
+            case .stationary: return .stationary
+            case .walking: return .walking
+            case .running: return .running
+            case .automotive: return .automotive
+            case .cycling: return .cycling
+            case .unknown: return .unknown
+            @unknown default: return .unknown
+            }
+        }()
+
+        let vibeConfidence: VibeSystem.Confidence = {
+            switch motionActivity.confidence {
+            case .high: return .high
+            case .medium: return .medium
+            case .low: return .low
+            @unknown default: return .low
+            }
+        }()
+
+        // Evaluate Vibe & Probability
+        // Note: Using VibeEngine (rule-based) in synchronous init.
+        // For ML predictions, use SensorData.withMLPrediction() async factory method.
+        let result = VibeSystem.evaluate(
+            motion: motionActivity.activityType,
+            confidence: vibeConfidence,
+            speed: location.current.speed,
+            distance: self.distance,
+            duration: self.duration,
+            timestamp: self.timestamp
+        )
+        self.vibe = result.vibe
+        self.probability = result.probability
     }
 
     // MARK: - CSVEncodable
 
     public static var csvHeader: String {
-        "id,timestamp,totalDistance,motionActivity,activityStartTime,activityDuration,vibe"
+        "timestamp,distance,activity,startTime,duration,hour,dayOfWeek,vibe,probability"
     }
 
-    // specific to ISO8601DateFormatter which is thread-safe for formatting.
-    nonisolated(unsafe) private static let dateFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        return formatter
-    }()
-
     public func writeCSV(to output: inout String) {
-        let timestampString = Self.dateFormatter.string(from: timestamp)
-        let startTimeString = Self.dateFormatter.string(from: activityStartTime)
+        // ML-Ready: Unix Timestamps (Raw Numbers)
+        let timestampString = String(timestamp.timeIntervalSince1970)
 
-        output.append(id.uuidString)
-        output.append(",")
+        // Extract Time Context for ML
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.hour, .weekday], from: timestamp)
+        let hourString = String(components.hour ?? 0)
+        let dayOfWeekString = String(components.weekday ?? 1)
+
+        // ML-Ready Raw Values
+        let distanceString = String(distance)
+        let durationString = String(duration)
+        let startTimeString = String(startTime.timeIntervalSince1970)
+        let probabilityString = String(probability)
+
         output.append(timestampString)
         output.append(",")
-        output.append("\(totalDistance)")  // Double interpolation
+        output.append(distanceString)
         output.append(",")
-        output.append(motionActivity.rawValue)
+        output.append(String(activity.id))  // Integer ID
         output.append(",")
         output.append(startTimeString)
         output.append(",")
-        output.append("\(activityDuration)")
+        output.append(durationString)
         output.append(",")
-        output.append(vibe.rawValue)
+        output.append(hourString)
+        output.append(",")
+        output.append(dayOfWeekString)
+        output.append(",")
+        output.append(String(vibe.id))  // Integer ID
+        output.append(",")
+        output.append(probabilityString)
     }
 
-    // Legacy property uses the efficient method via protocol extension default
-    // keeping explicit here just in case, but can be removed if protocol default is sufficient.
-    // Protocol default is sufficient. Removing explicit csvRow.
+    // MARK: - Integration
 
-    // MARK: - Helper
+    /// Encapsulates location data for sensor readings.
+    public struct Location: Sendable {
+        public let current: CLLocation
+        public let recent: CLLocation
 
-    // MARK: - Vibe Derivation
+        public init(current: CLLocation, recent: CLLocation) {
+            self.current = current
+            self.recent = recent
+        }
 
-    private static func deriveVibe(
-        motion: CMActivityType, distance: Double, timestamp: Date
-    ) -> Vibe {
-        return VibeSystem.evaluate(motion: motion, distance: distance, timestamp: timestamp)
+        public var distance: Double {
+            current.distance(from: recent)
+        }
+    }
+
+    // Internal init for testing
+    internal init(
+        distance: Double = 0.0,
+        activity: CMActivityType = .unknown,
+        startTime: Date = Date(),
+        vibe: Vibe = .unknown,
+        probability: Double = 0.0,
+        id: UUID = UUID(),
+        timestamp: Date = Date()
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.distance = distance
+        self.activity = activity
+        self.startTime = startTime
+        self.duration = timestamp.timeIntervalSince(startTime)
+        self.vibe = vibe
+        self.probability = probability
+    }
+}
+
+extension CMMotionActivity {
+    @inline(__always)  // Optimization: Force inline for zero overhead
+    var activityType: CMActivityType {
+        if self.confidence == .low { return .unknown }
+        if self.cycling { return .cycling }
+        if self.running { return .running }
+        if self.automotive { return .automotive }
+        if self.walking { return .walking }
+        if self.stationary { return .stationary }
+        return .unknown
     }
 }

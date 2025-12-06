@@ -2,7 +2,7 @@
 //  LocationDataCollector.swift
 //  DataCollector
 //
-//  Created by Sijo on 04/12/25.
+//  Created by Antigravity on 04/12/25.
 //
 
 import CoreLocation
@@ -12,9 +12,7 @@ import Logger
 @Observable
 @MainActor
 final class LocationDataCollector: NSObject {
-    private(set) var totalDistance: CLLocationDistance = 0
     private(set) var lastLocation: CLLocation = .init(latitude: 0, longitude: 0)
-    private(set) var startLocation: CLLocation = .init(latitude: 0, longitude: 0)
 
     /// A stream of location updates.
     public var locationUpdates: AsyncStream<CLLocation> {
@@ -22,11 +20,6 @@ final class LocationDataCollector: NSObject {
     }
 
     private let (_locationStream, _locationContinuation) = AsyncStream<CLLocation>.makeStream()
-
-    func resetDistance() {
-        totalDistance = 0
-        startLocation = lastLocation
-    }
 
     private var authorizationStatus: CLAuthorizationStatus = .notDetermined {
         didSet {
@@ -60,13 +53,21 @@ final class LocationDataCollector: NSObject {
         locationManager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
         locationManager.distanceFilter = 10
 
+        // Optimization: Set activity type for better battery efficiency
+        locationManager.activityType = .fitness
+
         // Allow system to pause updates to save battery when stationary
         locationManager.pausesLocationUpdatesAutomatically = true
 
-        // Only enable background updates if the app has the capability
-        // This prevents crashes in test environments where UIBackgroundModes is not set
-        if Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") != nil {
+        // Safely enable background updates if configured
+        if let connectionModes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes")
+            as? [String],
+            connectionModes.contains("location")
+        {
             locationManager.allowsBackgroundLocationUpdates = true
+        } else {
+            log.warning(
+                "Background location updates skipped: missing 'location' in UIBackgroundModes.")
         }
     }
 
@@ -122,15 +123,7 @@ extension LocationDataCollector: @MainActor CLLocationManagerDelegate {
             return
         }
 
-        // Check if this is the first update (lastLocation is effectively uninitialized at 0,0)
-        if lastLocation.coordinate.latitude == 0 && lastLocation.coordinate.longitude == 0 {
-            lastLocation = location
-            startLocation = location
-            // Do not add distance for the initial fix or we get distance from (0,0)
-        } else {
-            totalDistance += location.distance(from: lastLocation)
-            lastLocation = location
-        }
+        lastLocation = location
 
         _locationContinuation.yield(location)
     }

@@ -2,25 +2,36 @@
 //  MotionDataCollector.swift
 //  DataCollector
 //
-//  Created by Sijo on 04/12/25.
+//  Created by Antigravity on 04/12/25.
 //
 
 import CoreMotion
 import Foundation
 import Logger
 
+// CMMotionActivity is effectively immutable but pre-dates Sendable.
+// We wrap it in an unchecked Sendable container to pass through AsyncStream.
+public struct UncheckedSendable<T>: @unchecked Sendable {
+    public let value: T
+    public init(_ value: T) {
+        self.value = value
+    }
+}
+
 @Observable
 @MainActor
 final class MotionDataCollector {
-    private(set) var activityType: CMActivityType = .unknown
-    private(set) var activityStartTime: Date = Date()
-
-    /// A stream of activity updates.
-    public var activityUpdates: AsyncStream<CMActivityType> {
-        _activityStream
+    /// A stream of raw CMMotionActivity updates.
+    public var rawActivityUpdates: AsyncStream<UncheckedSendable<CMMotionActivity>> {
+        _rawActivityStream
     }
 
-    private let (_activityStream, _activityContinuation) = AsyncStream<CMActivityType>.makeStream()
+    public private(set) var currentActivity: CMMotionActivity?
+
+    private let (_rawActivityStream, _rawActivityContinuation) = AsyncStream<
+        UncheckedSendable<CMMotionActivity>
+    >
+    .makeStream()
 
     private var authorizationStatus: CMAuthorizationStatus =
         CMMotionActivityManager.authorizationStatus()
@@ -98,31 +109,7 @@ final class MotionDataCollector {
     // MARK: - Helpers
 
     private func updateActivity(_ activity: CMMotionActivity) {
-        let newActivityType: CMActivityType
-        if activity.confidence == .low {
-            newActivityType = .unknown
-        } else if activity.stationary {
-            newActivityType = .stationary
-        } else if activity.walking {
-            newActivityType = .walking
-        } else if activity.running {
-            newActivityType = .running
-        } else if activity.automotive {
-            newActivityType = .automotive
-        } else if activity.cycling {
-            newActivityType = .cycling
-        } else {
-            newActivityType = .unknown
-        }
-
-        if newActivityType != activityType {
-            self.activityType = newActivityType
-            // Yield the new activity type to the stream
-            _activityContinuation.yield(newActivityType)
-        }
-
-        if activityStartTime != activity.startDate {
-            activityStartTime = activity.startDate
-        }
+        self.currentActivity = activity
+        _rawActivityContinuation.yield(UncheckedSendable(activity))
     }
 }

@@ -24,7 +24,10 @@ let package = Package(
         .target(
             name: "DataCollector",
             dependencies: [
-                .product(name: "Trainer", package: "Trainer"),
+                .product(name: "Trainer", package: "Trainer")
+            ],
+            resources: [
+                .process("Resources")
             ]
         ),
         .testTarget(

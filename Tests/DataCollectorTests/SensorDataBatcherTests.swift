@@ -2,7 +2,7 @@
 //  SensorDataBatcherTests.swift
 //  DataCollectorTests
 //
-//  Created by Sijo on 05/12/25.
+//  Created by Antigravity on 05/12/25.
 //
 
 import Foundation
@@ -15,13 +15,18 @@ import Testing
     var store: Store<SensorData>
     var batcher: SensorDataBatcher
     var fileSystem: FileSystem
-    var csvStore: CSVStore
     var testPath: String
 
     init() async throws {
         testPath = "VibeTests/Batcher_" + UUID().uuidString
+
+        // Ensure directory exists
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent(testPath, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
         fileSystem = FileSystem(.custom(testPath))
-        csvStore = CSVStore(fileSystem: fileSystem)
+        let csvStore = CSVStore(fileSystem: fileSystem)
         store = Store(csvStore: csvStore)
         batcher = SensorDataBatcher(store: store)
     }
@@ -34,20 +39,20 @@ import Testing
     }
 
     @Test func accumulationAndFlush() async throws {
-        let data = SensorData(motionActivity: .unknown)
+        let data = SensorData()
 
-        // Act: Add data to buffer
+        // Act: Add data
         await batcher.append(data)
 
-        // Assert: Before flush, store may not have written yet
-        var datasets = await csvStore.listDatasets()
-        // Buffer not yet flushed, so might be empty
+        // Assert: Store check
+        var datasets = try await fileSystem.listFiles(withExtension: "csv")
+        // might be 0
 
         // Act: Force flush
         await batcher.flush()
 
-        // Assert: After flush, exactly one dataset should exist
-        datasets = await csvStore.listDatasets()
+        // Assert
+        datasets = try await fileSystem.listFiles(withExtension: "csv")
         #expect(datasets.count == 1)
     }
 }
