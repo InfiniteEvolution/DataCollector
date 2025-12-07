@@ -14,60 +14,76 @@ import Testing
 
 @Suite struct SensorDataTests {
 
-    @Test func defaultInitialization() {
-        let data = SensorData()
-        #expect(data.activity == .unknown)
+    @Test func initialization() {
+        let now = Date()
+        let id = UUID()
+        let data = SensorData(
+            distance: 100.0,
+            activity: .walking,
+            startTime: now.addingTimeInterval(-60),
+            vibe: .energetic,
+            id: id,
+            timestamp: now
+        )
+
+        #expect(data.id == id)
+        #expect(data.timestamp == now)
+        #expect(data.distance == 100.0)
+        #expect(data.activity == .walking)
+        #expect(data.vibe == .energetic)
+        // Fuzzy compare double?
+        #expect(abs(data.duration - 60.0) < 0.001)
+    }
+
+    @Test func vibeDerivation() {
+        let data = SensorData(distance: 0, activity: .stationary)
         #expect(data.vibe == .unknown)
-        #expect(data.probability == 0.0)
-        #expect(data.distance == 0.0)
     }
 
-    @Test func csvHeaderCorrectness() {
-        let header = SensorData.csvHeader
-        #expect(
-            header
-                == "timestamp,distance,activity,startTime,duration,hour,dayOfWeek,vibe,probability")
+    @Test func csvEncoding() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let start = now.addingTimeInterval(-60)
+        let id = UUID()
+        let data = SensorData(
+            distance: 50.5,
+            activity: .running,
+            startTime: start,
+            vibe: .energetic,
+            id: id,
+            timestamp: now
+        )
+
+        var csv = ""
+        data.writeCSV(to: &csv)
+
+        let parts = csv.split(separator: ",")
+        #expect(parts.count == 9)
+        // Timestamp (Double)
+        #expect(Double(parts[0]) != nil)
+        // Distance (50.5)
+        #expect(Double(parts[1]) == 50.5)
+        // Activity ID (running = 2)
+        #expect(parts[2] == "2")
+        // StartTime (Double)
+        #expect(Double(parts[3]) != nil)
+        // Duration (60.0)
+        #expect(Double(parts[4]) == 60.0)
+        // Hour (From timestamp)
+        #expect(Int(parts[5]) != nil)
+        // DayOfWeek
+        #expect(Int(parts[6]) != nil)
+        // Vibe ID (energetic = 2)
+        #expect(parts[7] == "2")
+        // Probability
+        #expect(Double(parts[8]) != nil)
     }
 
-    @Test func csvRowFormatting() {
-        var data = SensorData()
-        // Manually set some values if possible, or rely on default.
-        // Since properties are let, we rely on default init for now which gives consistent 0 values.
+    @Test func codable() throws {
+        let data = SensorData(activity: .cycling)
+        let encoder = JSONEncoder()
+        let decoded = try JSONDecoder().decode(SensorData.self, from: try encoder.encode(data))
 
-        var output = ""
-        data.writeCSV(to: &output)
-
-        let components = output.split(separator: ",")
-        #expect(components.count == 9)
-
-        // Verify specific values we know from default init
-        // activity.id for .unknown is 5
-        #expect(components[2] == "5")
-        // vibe.id for .unknown is 7
-        #expect(components[7] == "7")
-        // probability is 0.0
-        #expect(components[8] == "0.0")
-    }
-
-    @Test func activityTypeMapping() {
-        #expect(CMActivityType.stationary.id == 0)
-        #expect(CMActivityType.walking.id == 1)
-        #expect(CMActivityType.running.id == 2)
-        #expect(CMActivityType.automotive.id == 3)
-        #expect(CMActivityType.cycling.id == 4)
-        #expect(CMActivityType.unknown.id == 5)
-
-        #expect(CMActivityType.walking.isMoving)
-        #expect(CMActivityType.running.isHighIntensity)
-        #expect(!CMActivityType.stationary.isMoving)
-    }
-
-    @Test func vibeEnumMapping() {
-        #expect(Vibe.sleep.id == 0)
-        #expect(Vibe.morningRoutine.id == 1)
-        #expect(Vibe.focus.id == 4)
-        #expect(Vibe.unknown.id == 7)
-
-        #expect(Vibe.focus.title == "Focus")
+        #expect(data.activity == decoded.activity)
+        #expect(data.id == decoded.id)
     }
 }

@@ -22,7 +22,11 @@ actor VibePredictor {
     /// Cached Calendar instance to avoid repeated allocations.
     ///
     /// - Note: This optimization saves ~50 bytes per prediction call.
-    private let calendar = Calendar.current
+    private static let calendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone.autoupdatingCurrent
+        return c
+    }()
 
     /// Creates a new vibe predictor.
     ///
@@ -74,12 +78,12 @@ actor VibePredictor {
     @inline(__always)
     private func vibeFromID(_ id: Int) -> Vibe {
         guard id >= 0 else {
-            log.info("Received negative vibe ID: \(id)")
+            log.warning("Received negative vibe ID: \(id)")
             return .unknown
         }
 
         guard id < Self.vibeTable.count else {
-            log.info("Received out-of-bounds vibe ID: \(id)")
+            log.warning("Received out-of-bounds vibe ID: \(id)")
             return .unknown
         }
 
@@ -97,7 +101,7 @@ actor VibePredictor {
         let prediction = {
             // Try ML model first
             guard let model = model else {
-                log.info("ML model is nil. Using VibeEngine fallback.")
+                log.warning("ML model is nil. Using VibeEngine fallback.")
                 return predict(ve: &sensorData)
             }
 
@@ -108,24 +112,26 @@ actor VibePredictor {
                 activity: Int64(sensorData.activity.id),
                 startTime: sensorData.startTime.timeIntervalSince1970,
                 duration: sensorData.duration,
-                hour: Int64(calendar.component(.hour, from: sensorData.timestamp)),
-                dayOfWeek: Int64(calendar.component(.weekday, from: sensorData.timestamp))
+                hour: Int64(Self.calendar.component(.hour, from: sensorData.timestamp)),
+                dayOfWeek: Int64(Self.calendar.component(.weekday, from: sensorData.timestamp))
             )
+            
+            do {
+                let prediction = try model.prediction(input: input)
+                
+                guard let probability = prediction.vibeProbability[prediction.vibe] else {
+                    log.warning("Failed to get probability for predicted vibe from ML model.")
+                    // Fallback to VibeEngine
+                    return predict(ve: &sensorData)
+                }
 
-            guard let prediction = try? model.prediction(input: input) else {
-                log.info("Failed to get prediction from ML model.")
+                log.info("ML prediction: vibe: \(prediction.vibe), probability: \(probability)")
+                return (vibeFromID(Int(prediction.vibe)), probability)
+            } catch let error {
+                log.error("Failed to use ML model: \(error.localizedDescription).")
                 // Fallback to VibeEngine
                 return predict(ve: &sensorData)
             }
-
-            guard let probability = prediction.vibeProbability[prediction.vibe] else {
-                log.info("Failed to get probability for predicted vibe from ML model.")
-                // Fallback to VibeEngine
-                return predict(ve: &sensorData)
-            }
-
-            log.notice("ML prediction: vibe: \(prediction.vibe), probability: \(probability)")
-            return (vibeFromID(Int(prediction.vibe)), probability)
         }()
 
         // Update with ML prediction
@@ -140,7 +146,9 @@ actor VibePredictor {
     /// - Parameter sensorData: The sensor data to update with the prediction.
     /// - Returns: A tuple containing the predicted vibe and its probability.
     @discardableResult
-    func predict(ve sensorData: inout SensorData) -> (vibe: Vibe, probability: Double) {
+    @inline(__always) nonisolated func predict(ve sensorData: inout SensorData) -> (
+        vibe: Vibe, probability: Double
+    ) {
 
         let vibeConfidence: VibeSystem.Confidence = {
             switch sensorData.confidence {
@@ -165,7 +173,7 @@ actor VibePredictor {
 
         sensorData.vibe = result.vibe
         sensorData.probability = result.probability
-        log.notice(
+        log.info(
             "VibeEngine prediction: vibe: \(result.vibe), with probability: \(result.probability)")
         return (vibe: result.vibe, probability: result.probability)
     }

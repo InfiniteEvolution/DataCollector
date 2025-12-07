@@ -148,7 +148,7 @@ public struct SensorData: Codable, Identifiable, Timestampable, CSVEncodable, Se
         "timestamp,distance,activity,startTime,duration,hour,dayOfWeek,vibe,probability"
     }
 
-    public func writeCSV(to output: inout String) {
+    public func write(csv output: inout String) {
         // ML-Ready: Unix Timestamps (Raw Numbers)
         let timestampString = String(timestamp.timeIntervalSince1970)
 

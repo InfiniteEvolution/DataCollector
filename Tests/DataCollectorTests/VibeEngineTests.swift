@@ -12,26 +12,38 @@ import Testing
 @testable import DataCollector
 
 @Suite struct VibeEngineTests {
-    init() {
-        // Force UTC for deterministic testing
-    }
 
     // Helper to create a date on a known Weekday (Monday, Jan 2, 2023)
     // or Weekend (Sunday, Jan 1, 2023).
-    // Note: Use UTC Calendar to align with VibeSystem's test-mode override
+    // Note: Use Calendar.current to align with VibeSystem usage
     func makeDate(isWeekend: Bool, hour: Int, minute: Int) -> Date {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-
         var components = DateComponents()
         components.year = 2023
         components.month = 1
         components.day = isWeekend ? 1 : 2
         components.hour = hour
         components.minute = minute
-        return calendar.date(from: components)!
+        return Calendar.current.date(from: components)!
     }
-    
+
+    @Test func sleep() {
+        // 3:00 AM, Stationary -> Sleep
+        let date = makeDate(isWeekend: false, hour: 3, minute: 0)
+        let result = VibeSystem.evaluate(
+            motion: .stationary, confidence: .high, speed: 0, distance: 0, duration: 300,
+            timestamp: date)
+        #expect(result.vibe == .sleep)
+    }
+
+    @Test func morningRoutine() {
+        // 6:00 AM, Stationary -> Morning Routine
+        let date = makeDate(isWeekend: false, hour: 6, minute: 0)
+        let result = VibeSystem.evaluate(
+            motion: .stationary, confidence: .high, speed: 0, distance: 0, duration: 300,
+            timestamp: date)
+        #expect(result.vibe == .morningRoutine)
+    }
+
     @Test func exerciseInMorning() {
         // 6:30 AM, Running -> Energetic
         let date = makeDate(isWeekend: false, hour: 6, minute: 30)

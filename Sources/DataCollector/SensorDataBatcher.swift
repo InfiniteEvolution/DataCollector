@@ -17,16 +17,16 @@ import Store
 ///
 /// - Note: This actor is thread-safe and designed to be used by `SensorDataCollector`.
 actor SensorDataBatcher {
-    private let store: Store<SensorData>
     private let log = LogContext("SBAT")
-
+    private let csvStore: CSVStore
+    
     /// The internal buffer for sensor data.
-    private var buffer: [SensorData] = []
+    private var buffer: ContiguousArray<SensorData> = []
     /// The maximum number of items to hold in the buffer before triggering a save.
-    private let batchSizeLimit: Int
+    private let batchSizeLimit = 25
     /// The maximum time interval to hold data in the buffer before triggering a save.
     /// The maximum time interval to hold data in the buffer before triggering a save.
-    private let batchTimeLimit: TimeInterval
+    private let batchTimeLimit = 100.0
 
     /// The timestamp of the last successful save operation.
     private var lastSaveTime = Date()
@@ -37,10 +37,11 @@ actor SensorDataBatcher {
     ///   - store: The store to save data to.
     ///   - batchSize: The number of items to buffer before saving. Default is 500.
     ///   - batchInterval: The time interval (in seconds) to buffer before saving. Default is 300 (5 minutes).
-    init(store: Store<SensorData>, batchSize: Int = 500, batchInterval: TimeInterval = 300) {
-        self.store = store
-        batchSizeLimit = batchSize
-        batchTimeLimit = batchInterval
+    // Use a background queue for I/O to avoid blocking the main actor
+    private let writeQueue = DispatchQueue(label: "com.dataCollector.batchWrite", qos: .utility)
+
+    init(csvStore: CSVStore, batchSize: Int = 25, batchInterval: TimeInterval = 100) {
+        self.csvStore = csvStore
         buffer.reserveCapacity(batchSize)  // Optimization: Pre-allocate capacity
         log.inited()
     }
@@ -54,11 +55,14 @@ actor SensorDataBatcher {
         buffer.append(data)
 
         guard buffer.count >= batchSizeLimit else {
-            log.info("batchSizeLimit not reached, \(buffer.count) | \(batchSizeLimit).")
+            log.warning("batchSizeLimit not reached, \(buffer.count) | \(batchSizeLimit).")
             return
         }
 
-        await persistBufferedData()
+        // Offload persistence to background queue
+        writeQueue.async {
+            Task { await self.persistBufferedData() }
+        }
     }
 
     /// Checks if the buffer should be flushed based on the time elapsed since the last save.
@@ -69,12 +73,12 @@ actor SensorDataBatcher {
         let timeSinceLastSave = Date().timeIntervalSince(lastSaveTime)
 
         guard !buffer.isEmpty else {
-            log.info("Buffer is empty, no need to flush.")
+            log.warning("Buffer is empty, no need to flush.")
             return
         }
 
         guard timeSinceLastSave >= batchTimeLimit else {
-            log.info("Flush not needed, time not exceeded. \(buffer.count) | \(batchSizeLimit).")
+            log.warning("Flush not needed, time not exceeded. \(buffer.count) | \(batchSizeLimit).")
             return
         }
 
@@ -95,22 +99,21 @@ actor SensorDataBatcher {
     /// buffer state (clearing it after a successful hand-off).
     private func persistBufferedData() async {
         guard !buffer.isEmpty else {
-            log.info("No data to save, buffer is empty.")
+            log.warning("No data to save, buffer is empty.")
             return
         }
 
         // Capture the buffer and clear it immediately to be ready for new data
-        let dataToSave = buffer
+        let dataToSave = Array(buffer)
         buffer.removeAll(keepingCapacity: true)
         lastSaveTime = Date()
 
+        // Perform the save operation on the background queue to avoid blocking
         do {
-            // Await the save operation to ensure data is written before proceeding.
-            // This provides a clear, linear flow of execution.
-            try await store.save(dataToSave)
-            log.debug("Successfully saved batch of \(dataToSave.count) items.")
+            try await csvStore.save(dataToSave)
+            log.info("Successfully saved batch of \(dataToSave.count) items.")
         } catch {
-            log.error("Failed to save sensor data batch: \(error.localizedDescription)")
+            log.warning("Failed to save sensor data batch: \(error.localizedDescription)")
         }
     }
 

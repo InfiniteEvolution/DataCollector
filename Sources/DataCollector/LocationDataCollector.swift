@@ -11,6 +11,7 @@ import Logger
 
 @MainActor
 final class LocationDataCollector: NSObject {
+    private let log = LogContext("LDAT")
     /// The last known location.
     ///
     /// This property is updated on the Main Actor whenever a new location is received.
@@ -30,7 +31,7 @@ final class LocationDataCollector: NSObject {
                 authorizationStatus == .authorizedAlways
                     || authorizationStatus == .authorizedWhenInUse
             else {
-                log.notice("Location authorization revoked or not granted.")
+                log.warning("Location authorization revoked or not granted.")
                 stop()
                 return
             }
@@ -38,11 +39,10 @@ final class LocationDataCollector: NSObject {
             start()
         }
     }
-
+    
     private let locationManager = CLLocationManager()
-    private let log = LogContext("LDAT")
     private var isCollecting = false
-
+    
     /// Initializes a new location collector.
     ///
     /// This initializer configures the `CLLocationManager` with settings optimized for battery life,
@@ -101,7 +101,7 @@ final class LocationDataCollector: NSObject {
         }
 
         guard !isCollecting else {
-            log.notice("Location updates are already active.")
+            log.warning("Location updates are already active.")
             return
         }
 
@@ -113,7 +113,7 @@ final class LocationDataCollector: NSObject {
     /// Stops location updates.
     func stop() {
         guard isCollecting else {
-            log.notice("Location updates are already stopped.")
+            log.warning("Location updates are already stopped.")
             return
         }
 
@@ -131,10 +131,10 @@ final class LocationDataCollector: NSObject {
 extension LocationDataCollector: @MainActor CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else {
-            log.notice("Received empty location update.")
+            log.warning("Received empty location update.")
             return
         }
-
+        
         lastLocation = location
 
         _locationContinuation.yield(location)
@@ -143,26 +143,24 @@ extension LocationDataCollector: @MainActor CLLocationManagerDelegate {
     func locationManager(
         _ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus
     ) {
-        log.info("Authorization status \(manager.authorizationStatus.rawValue)")
         authorizationStatus = status
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorizationStatus = manager.authorizationStatus
-        log.info("Authorization status changed: \(manager.authorizationStatus.rawValue)")
     }
 
     func locationManagerDidPauseLocationUpdates(_ manager: CLLocationManager) {
-        log.notice("Location updates paused.")
+        log.info("Location updates paused.")
     }
 
     func locationManagerDidResumeLocationUpdates(_ manager: CLLocationManager) {
-        log.notice("Location updates resumed.")
+        log.info("Location updates resumed.")
     }
 
     func locationManager(
         _ manager: CLLocationManager, didFinishDeferredUpdatesWithError error: (any Error)?
     ) {
-        log.notice("Finished deferred updates with error: \(String(describing: error)).")
+        log.error("Finished deferred updates with error: \(String(describing: error)).")
     }
 }

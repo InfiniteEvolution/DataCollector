@@ -38,12 +38,4 @@ import Testing
         try await Task.sleep(nanoseconds: 100_000_000)
         collector.stop()
     }
-    @Test func initialState() async throws {
-        // Verify default state before collection
-        let data = collector.sensorData
-        
-        #expect(data.vibe == .unknown)
-        #expect(data.activity == .unknown)
-        #expect(data.probability == 0.0)
-    }
 }

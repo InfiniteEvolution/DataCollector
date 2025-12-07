@@ -72,7 +72,7 @@ final class MotionDataCollector {
         if authorizationStatus == .authorized {
             start()
         } else {
-            log.notice("Motion permission not granted.")
+            log.warning("Motion permission not granted.")
         }
     }
 
@@ -89,12 +89,12 @@ final class MotionDataCollector {
         }
 
         guard !isCollecting else {
-            log.notice("Motion updates are already active.")
+            log.warning("Motion updates are already active.")
             return
         }
 
         guard CMMotionActivityManager.isActivityAvailable() else {
-            log.error("Motion activity is not available on this device.")
+            log.warning("Motion activity is not available on this device.")
             return
         }
 

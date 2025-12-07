@@ -22,10 +22,8 @@ import Trainer
 @Observable
 @MainActor
 public final class SensorDataCollector {
-    // MARK: - Properties
-
     private let log = LogContext("SDCR")
-
+    
     /// The most recent sensor data snapshot.
     public private(set) var sensorData: SensorData
 
@@ -52,23 +50,16 @@ public final class SensorDataCollector {
     ///
     /// This initializer acts as the composition root for the Data/Training subsystem.
     /// - Parameter store: Optional store for testing injection. If nil, default dependencies are created.
-    public convenience init() {
-        self.init(store: nil)
+    public convenience init() async {
+        await self.init(store: nil)
     }
-
-    init(store: Store<SensorData>? = nil) {
-        // 1. Composition Root: Initialize Dependencies
-        let fs = FileSystem(.custom("CanvasData"))
-        let csv = CSVStore(fileSystem: fs)
-        let models = ModelStore(name: "VibeClassifier", fileSystem: fs)
-
+    
+    init(store: Store<SensorData>?) async {
         // Use injected store or create default
-        let actualStore = Store<SensorData>(csvStore: csv)
-        let trainer = OnDeviceTrainer(modelStore: models, csvStore: csv)
-
-        self.store = actualStore
-        self.trainer = trainer
-        self.batcher = SensorDataBatcher(store: actualStore)
+        let store = store ?? Store<SensorData>()
+        self.store = store
+        self.trainer = await OnDeviceTrainer(modelStore: store.modelStore, csvStore: store.csvStore)
+        self.batcher = await SensorDataBatcher(csvStore: store.csvStore)
 
         // Initialize with default/current values
         sensorData = .init()
@@ -101,10 +92,15 @@ public final class SensorDataCollector {
 
         // Setup flush timer
         let timerTask = Task { [weak self] in
+            guard let self else { return }
+            
             while true {
-                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
-                guard let self else { return }
-                await batcher.flushIfNecessary()
+                do {
+                    try await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                    await batcher.flushIfNecessary()
+                } catch let error {
+                    log.error("Failed to flush sensor data: \(error.localizedDescription).")
+                }
             }
         }
 
@@ -131,11 +127,12 @@ public final class SensorDataCollector {
         }
 
         // Dual prediction strategy:
-        Task {
-            // 1. VibeEngine prediction for CSV/training data (synchronous)
-            var sensorData = SensorData(motionActivity: activity, location: locStruct)
-            await vibePredictor.predict(ve: &sensorData)
+        // 1. VibeEngine prediction for CSV/training data (synchronous)
+        var sensorData = SensorData(motionActivity: activity, location: locStruct)
+        // Optimization: Call nonisolated directly to avoid actor hop
+        vibePredictor.predict(ve: &sensorData)
 
+        Task {
             // Send to batcher for CSV writing (uses VibeEngine prediction)
             await batcher.append(sensorData)
 
@@ -191,3 +188,4 @@ public final class SensorDataCollector {
         }
     }
 }
+
