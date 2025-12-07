@@ -33,7 +33,7 @@ public final class SensorDataCollector {
 
     // Dependencies
     let store: Store<SensorData>
-    let trainer: OnDeviceTrainer
+    let trainer: Trainer
 
     // Batcher
     private let batcher: SensorDataBatcher
@@ -42,7 +42,7 @@ public final class SensorDataCollector {
     private var previousLocation: CLLocation = .init(latitude: .zero, longitude: .zero)
     private var tasks: [Task<Void, Never>] = []
 
-    private let vibePredictor = VibePredictor()
+    private let vibePredictor: VibePredictor
 
     // MARK: - Initialization
 
@@ -51,16 +51,20 @@ public final class SensorDataCollector {
     /// This initializer acts as the composition root for the Data/Training subsystem.
     /// - Parameter store: Optional store for testing injection. If nil, default dependencies are created.
     public convenience init() async {
-        await self.init(store: nil)
+        let store = await Store<SensorData>()
+        await self.init(store: store)
     }
     
-    init(store: Store<SensorData>?) async {
-        // Use injected store or create default
-        let store = store ?? Store<SensorData>()
+    init(store: Store<SensorData>) async {
         self.store = store
-        self.trainer = await OnDeviceTrainer(modelStore: store.modelStore, csvStore: store.csvStore)
+        
+        let trainerStore = await store.trainerStore
+        let csvStore = await store.csvStore
+        
+        self.trainer = await Trainer(trainerStore, csvStore:csvStore)
         self.batcher = await SensorDataBatcher(csvStore: store.csvStore)
-
+        self.vibePredictor = VibePredictor(trainerStore)
+        
         // Initialize with default/current values
         sensorData = .init()
 

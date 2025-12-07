@@ -3,7 +3,7 @@
 //  Package.swift
 //  DataCollector
 //
-//  Created by Sijo using AI on 30/11/25.
+//  Created by sijo on 30/11/25.
 //
 
 import PackageDescription
@@ -25,9 +25,6 @@ let package = Package(
             name: "DataCollector",
             dependencies: [
                 .product(name: "Trainer", package: "Trainer")
-            ],
-            resources: [
-                .process("Resources")
             ]
         ),
         .testTarget(

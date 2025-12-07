@@ -20,10 +20,11 @@ import Testing
     init() async throws {
         testPath = "VibeTests/Collector_" + UUID().uuidString
         fileSystem = FileSystem(.custom(testPath))
-        let csvStore = CSVStore(fileSystem: fileSystem)
-        store = Store(csvStore: csvStore)
+        let csvStore = CSVStore(fileSystem)
+        let trainerStore = await TrainerStore(fileSystem)
+        store = await Store(csvStore: csvStore, trainerStore: trainerStore, fileSystem: fileSystem)
 
-        collector = SensorDataCollector(store: store)
+        collector = await SensorDataCollector(store: store)
     }
 
     deinit {

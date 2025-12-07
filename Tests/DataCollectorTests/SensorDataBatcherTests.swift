@@ -26,9 +26,10 @@ import Testing
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         fileSystem = FileSystem(.custom(testPath))
-        let csvStore = CSVStore(fileSystem: fileSystem)
-        store = Store(csvStore: csvStore)
-        batcher = SensorDataBatcher(store: store)
+        let csvStore = CSVStore(fileSystem)
+        let trainerStore = await TrainerStore(fileSystem)
+        store = await Store(csvStore: csvStore, trainerStore: trainerStore, fileSystem: fileSystem)
+        batcher = SensorDataBatcher(csvStore: csvStore)
     }
 
     deinit {

@@ -36,8 +36,8 @@ import Testing
     }
 
     @Test func morningRoutine() {
-        // 6:00 AM, Stationary -> Morning Routine
-        let date = makeDate(isWeekend: false, hour: 6, minute: 0)
+        // 7:00 AM, Stationary -> Morning Routine (sleep ends at 7 AM)
+        let date = makeDate(isWeekend: false, hour: 7, minute: 0)
         let result = VibeSystem.evaluate(
             motion: .stationary, confidence: .high, speed: 0, distance: 0, duration: 300,
             timestamp: date)

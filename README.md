@@ -129,7 +129,7 @@ See [WHITEPAPER.md](WHITEPAPER.md#7-dual-prediction-strategy) for detailed imple
 
 ### Memory (10-15% reduction)
 - ✅ Cached Calendar instances
-- ✅ Pre-allocated SensorDataBatcher buffer (1000 capacity)
+- ✅ Pre-allocated SensorDataBatcher buffer (500 capacity)
 - ✅ Lookup tables for enum conversions
 
 ### Performance (5-10% faster)
@@ -152,15 +152,22 @@ print("Current vibe: \(latest.vibe)")  // e.g., .focus
 print("Confidence: \(latest.probability)")  // e.g., 0.99
 ```
 
-### Automatic Prediction
-The `SensorDataCollector` automatically handles dual-layer prediction (Rule-based for training, ML for UI). You do not need to manually request predictions.
-
+### Async ML Prediction
 ```swift
-// Access the latest automatically predicted data
-let data = collector.sensorData
-if data.vibe == .focus {
-    print("User is focused!")
-}
+// Get ML-predicted SensorData
+let data = await SensorData.withMLPrediction(
+    motionActivity: activity,
+    location: location
+)
+```
+
+### Rule-Based Prediction
+```swift
+// Get VibeEngine-predicted SensorData
+let data = SensorData(
+    motionActivity: activity,
+    location: location
+)
 ```
 
 ### Data Access

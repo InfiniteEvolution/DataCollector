@@ -13,7 +13,8 @@ import Testing
 
     @Test func initialization() {
         let collector = MotionDataCollector()
-        #expect(collector.currentActivity == nil)
+        // currentActivity is initialized with CMMotionActivity(), so it's never nil
+        #expect(collector.currentActivity.confidence == .low)
     }
 
     @Test func startStop() {

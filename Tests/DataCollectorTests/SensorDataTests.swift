@@ -18,12 +18,12 @@ import Testing
         let now = Date()
         let id = UUID()
         let data = SensorData(
+            id: id,
+            timestamp: now,
             distance: 100.0,
             activity: .walking,
             startTime: now.addingTimeInterval(-60),
-            vibe: .energetic,
-            id: id,
-            timestamp: now
+            vibe: .energetic
         )
 
         #expect(data.id == id)
@@ -45,16 +45,16 @@ import Testing
         let start = now.addingTimeInterval(-60)
         let id = UUID()
         let data = SensorData(
+            id: id,
+            timestamp: now,
             distance: 50.5,
             activity: .running,
             startTime: start,
-            vibe: .energetic,
-            id: id,
-            timestamp: now
+            vibe: .energetic
         )
 
         var csv = ""
-        data.writeCSV(to: &csv)
+        data.write(csv: &csv)
 
         let parts = csv.split(separator: ",")
         #expect(parts.count == 9)

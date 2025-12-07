@@ -40,7 +40,7 @@ actor SensorDataBatcher {
     // Use a background queue for I/O to avoid blocking the main actor
     private let writeQueue = DispatchQueue(label: "com.dataCollector.batchWrite", qos: .utility)
 
-    init(csvStore: CSVStore, batchSize: Int = 25, batchInterval: TimeInterval = 100) {
+    init(csvStore: CSVStore, batchSize: Int = 100, batchInterval: TimeInterval = 300) {
         self.csvStore = csvStore
         buffer.reserveCapacity(batchSize)  // Optimization: Pre-allocate capacity
         log.inited()

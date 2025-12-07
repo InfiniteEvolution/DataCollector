@@ -9,15 +9,16 @@ import CoreML
 import CoreMotion
 import Foundation
 import Logger
+import Store
 
 actor VibePredictor {
     private let log = LogContext("VBPR")
-    /// The CoreML model for vibe prediction, if available.
-    ///
-    /// This model is loaded once during initialization. If loading fails,
-    /// the predictor will use `VibeEngine` as a fallback for all predictions.
-    private lazy var model: VibeClassifier? = try? VibeClassifier(
-        configuration: MLModelConfiguration())
+
+    /// The CoreML model for vibe prediction.
+    /// Loaded asynchronously to check for updates.
+    private var model: VibeClassifier?
+
+    private let trainerStore: TrainerStore
 
     /// Cached Calendar instance to avoid repeated allocations.
     ///
@@ -30,18 +31,30 @@ actor VibePredictor {
 
     /// Creates a new vibe predictor.
     ///
-    /// Attempts to load the `VibeClassifier.mlmodel` from the app bundle.
-    /// If model loading fails, predictions will automatically use the
-    /// rule-based `VibeEngine` fallback.
-    ///
-    /// ## Example
-    ///
-    /// ```swift
-    /// let predictor = VibePredictor()
-    /// // Model loads automatically, or falls back to VibeEngine
-    /// ```
-    init() {
+    /// Attempts to load the `VibeClassifier.mlmodel` from the Documents directory (if updated)
+    /// or falls back to the app bundle.
+    init(_ trainerStore: TrainerStore) {
+        self.trainerStore = trainerStore
         log.inited()
+
+        Task {
+            await loadModel()
+        }
+    }
+
+    /// Loads the latest available model (Updated > Bundle).
+    private func loadModel() async {
+        do {
+            // Ensure model is in writable filesystem
+            try await trainerStore.prepareModel()
+
+            let url = try await trainerStore.getURL()
+            let config = MLModelConfiguration()
+            self.model = try VibeClassifier(contentsOf: url, configuration: config)
+            log.info("Loaded VibeClassifier from \(url.path)")
+        } catch {
+            log.error("Failed to load VibeClassifier: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Private Helpers
@@ -106,27 +119,42 @@ actor VibePredictor {
             }
 
             // Use cached calendar (zero allocation)
+            // The Updatable MLModel expects MLMultiArrays (Array(1)) for inputs.
             let input = VibeClassifierInput(
-                timestamp: sensorData.timestamp.timeIntervalSince1970,
-                distance: sensorData.distance,
-                activity: Int64(sensorData.activity.id),
-                startTime: sensorData.startTime.timeIntervalSince1970,
-                duration: sensorData.duration,
-                hour: Int64(Self.calendar.component(.hour, from: sensorData.timestamp)),
-                dayOfWeek: Int64(Self.calendar.component(.weekday, from: sensorData.timestamp))
+                timestamp: toMLDouble(sensorData.timestamp.timeIntervalSince1970),
+                distance: toMLDouble(sensorData.distance),
+                activity: toMLDouble(Double(sensorData.activity.id)),
+                startTime: toMLDouble(sensorData.startTime.timeIntervalSince1970),
+                duration: toMLDouble(sensorData.duration),
+                hour: toMLDouble(
+                    Double(Self.calendar.component(.hour, from: sensorData.timestamp))),
+                dayOfWeek: toMLDouble(
+                    Double(Self.calendar.component(.weekday, from: sensorData.timestamp)))
             )
-            
+
             do {
-                let prediction = try model.prediction(input: input)
-                
-                guard let probability = prediction.vibeProbability[prediction.vibe] else {
-                    log.warning("Failed to get probability for predicted vibe from ML model.")
+                let output = try model.prediction(input: input)
+
+                // Inspecting the model (Step 281) revealed:
+                // classLabel -> Int64 (The predicted label)
+                // classProbability -> Dictionary (The probabilities)
+                // vibe -> Dictionary (Likely redundant or same as classProbability due to naming config)
+
+                // Explicit Type Annotations to debug compiler confusion
+                let probabilities: [Int64: Double] = output.classProbability
+                let predictedLabel: Int64 = output.classLabel
+
+                // Ensure key matches dictionary key type
+                guard let probability = probabilities[predictedLabel] else {
+                    log.warning(
+                        "Failed to get probability for predicted vibe \(predictedLabel) from ML model. Keys: \(probabilities.keys)"
+                    )
                     // Fallback to VibeEngine
                     return predict(ve: &sensorData)
                 }
 
-                log.info("ML prediction: vibe: \(prediction.vibe), probability: \(probability)")
-                return (vibeFromID(Int(prediction.vibe)), probability)
+                log.info("ML prediction: vibe: \(predictedLabel), probability: \(probability)")
+                return (vibeFromID(Int(predictedLabel)), probability)
             } catch let error {
                 log.error("Failed to use ML model: \(error.localizedDescription).")
                 // Fallback to VibeEngine
@@ -180,5 +208,13 @@ actor VibePredictor {
 
     deinit {
         log.deinited()
+    }
+
+    /// Wraps a scalar double into an MLMultiArray of shape [1].
+    private func toMLDouble(_ value: Double) -> MLMultiArray {
+        // Force try is safe here because shape [1] with Double is always valid
+        let array = try! MLMultiArray(shape: [1], dataType: .double)
+        array[0] = NSNumber(value: value)
+        return array
     }
 }

@@ -251,6 +251,36 @@ Trains VibeClassifier using CreateML with sample weighting.
 
 **Output**: `VibeClassifier.mlmodel` (248 KB, 100% accuracy)
 
+### 4. Generate Updatable Model (Recommended for On-Device Training)
+
+To support on-device training (personalization), you must generate an updatable Neural Network model using Python and `coremltools`. The Swift CreateML Random Forest model is static and cannot be updated.
+
+**Prerequisites**:
+```bash
+pip3 install coremltools pandas numpy
+```
+
+**Generate Model**:
+```bash
+python3 DataCollector/Tools/generate_updatable_model.py
+```
+
+**Output**: `VibeClassifier.mlmodel` (Updatable Neural Network)
+
+**Compile**:
+After generating the model, you need to compile it. This requires the full Xcode application to be installed and selected (not just Command Line Tools).
+
+```bash
+# Ensure Xcode is selected
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+# Compile
+xcrun coremlcompiler compile VibeClassifier.mlmodel Sources/Store/Resources/
+```
+
+**Alternative**: Drag and drop `VibeClassifier.mlmodel` into your Xcode project (under `Store/Resources`). Xcode will automatically compile it during the build.
+
+
 ---
 
 ## Why This Approach Works

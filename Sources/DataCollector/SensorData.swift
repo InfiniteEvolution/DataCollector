@@ -201,17 +201,28 @@ public struct SensorData: Codable, Identifiable, Timestampable, CSVEncodable, Se
     }
 
     // Internal init for testing
-    init() {
-        self.id = UUID()
-        self.timestamp = Date()
-        self.distance = .zero
-        self.activity = .unknown
-        self.startTime = .now
-        self.duration = Date().timeIntervalSince(startTime)
-        self.vibe = .unknown
-        self.probability = .zero
-        self.confidence = .low
-        self.speed = .zero
+    init(
+        id: UUID = UUID(),
+        timestamp: Date = Date(),
+        distance: Double = .zero,
+        activity: CMActivityType = .unknown,
+        startTime: Date = .now,
+        duration: TimeInterval? = nil,
+        vibe: Vibe = .unknown,
+        probability: Double = .zero,
+        confidence: CMMotionActivityConfidence = .low,
+        speed: CLLocationSpeed = .zero
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.distance = distance
+        self.activity = activity
+        self.startTime = startTime
+        self.duration = duration ?? timestamp.timeIntervalSince(startTime)
+        self.vibe = vibe
+        self.probability = probability
+        self.confidence = confidence
+        self.speed = speed
     }
 }
 
