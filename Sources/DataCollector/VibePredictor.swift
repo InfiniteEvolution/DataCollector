@@ -65,10 +65,10 @@ actor VibePredictor {
     /// improving performance and cache locality.
     ///
     /// - Note: Array indices must match the vibe IDs from the ML model:
-    ///   0=unknown, 1=sleep, 2=energetic, 3=focus, 4=commute, 5=chill, 6=morningRoutine
+    ///   0=sleep, 1=morningRoutine, 2=energetic, 3=commute, 4=focus, 5=meal, 6=chill, 7=unknown
     private static let vibeTable: [Vibe] = [
-        .unknown, .sleep, .energetic, .focus,
-        .commute, .chill, .morningRoutine,
+        .sleep, .morningRoutine, .energetic, .commute,
+        .focus, .meal, .chill, .unknown,
     ]
 
     /// Converts an integer vibe ID to a Vibe enum value.
