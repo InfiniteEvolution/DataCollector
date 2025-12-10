@@ -188,7 +188,7 @@ static func withMLPrediction(
 
 **Optimizations**:
 - Inline annotation on activityType extension
-- Zero-copy UncheckedSendable wrapper
+- Direct AsyncStream of CMMotionActivity for efficient concurrency
 
 ---
 
@@ -379,7 +379,7 @@ private static let vibeTable: [Vibe] = [...]  // Shared across instances
 ```swift
 // Bitwise indexing, no iteration
 let index = (activityLevel << 11) | minuteOfWeek
-let (vibe, probability) = lookupTable[index]
+let (vibe, probability) = lookupTable[index] // Compressed UInt8 probability
 ```
 **Performance**: <0.1ms prediction time  
 **CPU**: Negligible impact on battery

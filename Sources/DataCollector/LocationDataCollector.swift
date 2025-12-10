@@ -39,10 +39,10 @@ final class LocationDataCollector: NSObject {
             start()
         }
     }
-    
+
     private let locationManager = CLLocationManager()
     private var isCollecting = false
-    
+
     /// Initializes a new location collector.
     ///
     /// This initializer configures the `CLLocationManager` with settings optimized for battery life,
@@ -134,7 +134,7 @@ extension LocationDataCollector: @MainActor CLLocationManagerDelegate {
             log.warning("Received empty location update.")
             return
         }
-        
+
         lastLocation = location
 
         _locationContinuation.yield(location)
@@ -162,5 +162,9 @@ extension LocationDataCollector: @MainActor CLLocationManagerDelegate {
         _ manager: CLLocationManager, didFinishDeferredUpdatesWithError error: (any Error)?
     ) {
         log.error("Finished deferred updates with error: \(String(describing: error)).")
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        log.error("Location manager failed: \(error.localizedDescription)")
     }
 }

@@ -1,9 +1,9 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 //
 //  Package.swift
 //  DataCollector
 //
-//  Created by sijo on 30/11/25.
+//  Created by Sijo on 30/11/25.
 //
 
 import PackageDescription

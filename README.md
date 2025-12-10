@@ -143,7 +143,19 @@ See [WHITEPAPER.md](WHITEPAPER.md#7-dual-prediction-strategy) for detailed imple
 
 ### Basic Collection
 ```swift
-let collector = SensorDataCollector()
+// Initialize components
+let batcher = Batcher(csvStore: store)
+// Define builder closure
+let builder: (CMMotionActivity, CLLocation) async -> SensorData = { activity, location in
+    await SensorData.withMLPrediction(motionActivity: activity, location: location)
+}
+
+// Initialize Generic Collector
+let collector = await SensorDataCollector(
+    sensorData: initialSensorData,
+    batcher: batcher,
+    builder: builder
+)
 collector.start()
 
 // Access latest sensor data (ML-predicted vibe)

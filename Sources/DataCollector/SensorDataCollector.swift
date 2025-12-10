@@ -13,6 +13,21 @@ import Observation
 import Store
 import Trainer
 
+/// Encapsulates location data for sensor readings.
+public struct Location: Sendable {
+    public let current: CLLocation
+    let recent: CLLocation
+
+    public init(current: CLLocation, recent: CLLocation) {
+        self.current = current
+        self.recent = recent
+    }
+
+    public var distance: Double {
+        current.distance(from: recent)
+    }
+}
+
 /// A coordinator for activity and location data collection.
 ///
 /// `SensorDataCollector` manages the lifecycle of `MotionDataCollector` and `LocationDataCollector`.
@@ -21,95 +36,63 @@ import Trainer
 /// - Note: This class must be used on the Main Actor.
 @Observable
 @MainActor
-public final class SensorDataCollector {
+public final class SensorDataCollector<T: CSVEncodable & Timestampable & Sendable> {
     private let log = LogContext("SDCR")
-    
+
     /// The most recent sensor data snapshot.
-    public private(set) var sensorData: SensorData
+    public private(set) var sensorData: T
 
     // Sub-collectors
     private let motionCollector = MotionDataCollector()
     private let locationCollector = LocationDataCollector()
 
-    // Dependencies
-    let store: Store<SensorData>
-    let trainer: Trainer
-
     // Batcher
-    private let batcher: SensorDataBatcher
+    private let batcher: Batcher<T>
 
-    // State
-    private var previousLocation: CLLocation = .init(latitude: .zero, longitude: .zero)
+    // Builder closure to create T from sensor data
+    private let builder: @MainActor (CMMotionActivity, CLLocation) async -> T
     private var tasks: [Task<Void, Never>] = []
-
-    private let vibePredictor: VibePredictor
 
     // MARK: - Initialization
 
-    /// Initializes a new collector and starts observing sub-collectors.
+    /// Initializes a new generic data collector.
     ///
-    /// This initializer acts as the composition root for the Data/Training subsystem.
-    /// - Parameter store: Optional store for testing injection. If nil, default dependencies are created.
-    public convenience init() async {
-        let store = await Store<SensorData>()
-        await self.init(store: store)
-    }
-    
-    init(store: Store<SensorData>) async {
-        self.store = store
-        
-        let trainerStore = await store.trainerStore
-        let csvStore = await store.csvStore
-        
-        self.trainer = await Trainer(trainerStore, csvStore:csvStore)
-        self.batcher = await SensorDataBatcher(csvStore: store.csvStore)
-        self.vibePredictor = VibePredictor(trainerStore)
-        
-        // Initialize with default/current values
-        sensorData = .init()
+    /// - Parameters:
+    ///   - initialData: Initial data value
+    ///   - batcher: CSV batcher for persisting data
+    ///   - builder: Closure to construct data from sensors
+    public init(
+        sensorData: T,
+        batcher: Batcher<T>,
+        builder: @escaping @MainActor (CMMotionActivity, CLLocation) async -> T
+    ) async {
+        self.sensorData = sensorData
+        self.batcher = batcher
+        self.builder = builder
 
         // Subscribe to Motion Updates
+        let motionStream = self.motionCollector.rawActivityUpdates
+        let locationRef = self.locationCollector  // Capture reference
         let motionTask = Task { [weak self] in
-            guard let self else { return }
-            for await activity in motionCollector.rawActivityUpdates {
-                updateSensorData(activity: activity.value)
+            for await activity in motionStream {
+                guard let self else { break }
+                await updateSensorData(activity: activity, location: locationRef.lastLocation)
             }
         }
 
         tasks.append(motionTask)
 
         // Subscribe to Location Updates
+        let locationStream = self.locationCollector.locationUpdates
+        let motionRef = self.motionCollector  // Capture reference
         let locationTask = Task { [weak self] in
-            guard let self else { return }
-
-            for await location in locationCollector.locationUpdates {
-                // Track location history for delta calculation
-                let recent = previousLocation
-                let locStruct = SensorData.Location(current: location, recent: recent)
-
-                // When location updates, we use the latest known motion data
-                updateSensorData(activity: motionCollector.currentActivity, location: locStruct)
-                previousLocation = location
+            for await location in locationStream {
+                guard let self else { break }
+                await updateSensorData(activity: motionRef.lastActivity, location: location)
             }
         }
+
         tasks.append(locationTask)
-
-        // Setup flush timer
-        let timerTask = Task { [weak self] in
-            guard let self else { return }
-            
-            while true {
-                do {
-                    try await Task.sleep(nanoseconds: 60 * 1_000_000_000)
-                    await batcher.flushIfNecessary()
-                } catch let error {
-                    log.error("Failed to flush sensor data: \(error.localizedDescription).")
-                }
-            }
-        }
-
-        tasks.append(timerTask)
-
         log.inited()
     }
 
@@ -118,34 +101,10 @@ public final class SensorDataCollector {
         log.deinited()
     }
 
-    private func updateSensorData(activity: CMMotionActivity, location: SensorData.Location? = nil)
-    {
-        // Resolve Location: Use provided, or construct from current/previous state
-        let locStruct: SensorData.Location
-        if let location {
-            locStruct = location
-        } else {
-            let current = locationCollector.lastLocation
-            let recent = previousLocation
-            locStruct = SensorData.Location(current: current, recent: recent)
-        }
-
-        // Dual prediction strategy:
-        // 1. VibeEngine prediction for CSV/training data (synchronous)
-        var sensorData = SensorData(motionActivity: activity, location: locStruct)
-        // Optimization: Call nonisolated directly to avoid actor hop
-        vibePredictor.predict(ve: &sensorData)
-
-        Task {
-            // Send to batcher for CSV writing (uses VibeEngine prediction)
-            await batcher.append(sensorData)
-
-            // 2. ML prediction for UI display (asynchronous, 100% accuracy)
-            await vibePredictor.predict(ml: &sensorData)
-
-            // Update UI with ML prediction
-            self.sensorData = sensorData
-        }
+    private func updateSensorData(activity: CMMotionActivity, location: CLLocation) async {
+        let sensorData = await builder(activity, location)
+        await batcher.append(sensorData)
+        self.sensorData = sensorData
     }
 
     // MARK: -  API
@@ -167,8 +126,6 @@ public final class SensorDataCollector {
     /// - Note: This is an alias for `requestAuthorization` to align with common API patterns.
     public func start() {
         requestAuthorization()
-        motionCollector.start()
-        locationCollector.start()
     }
 
     /// Stops all data collection and cancels pending tasks.
@@ -192,4 +149,3 @@ public final class SensorDataCollector {
         }
     }
 }
-
