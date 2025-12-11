@@ -11,7 +11,6 @@ import Foundation
 import Logger
 import Observation
 import Store
-import Trainer
 
 /// Encapsulates location data for sensor readings.
 public struct Location: Sendable {
