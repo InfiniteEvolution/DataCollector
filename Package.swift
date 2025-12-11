@@ -18,13 +18,13 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/InfiniteEvolution/Trainer.git", branch: "M0")
+        .package(url: "https://github.com/InfiniteEvolution/Store.git", branch: "M0")
     ],
     targets: [
         .target(
             name: "DataCollector",
             dependencies: [
-                .product(name: "Trainer", package: "Trainer")
+                .product(name: "Store", package: "Store")
             ]
         ),
         .testTarget(
