@@ -114,11 +114,22 @@ final class MotionDataCollector {
 
     // MARK: - Helpers
 
+    private var debounceTask: Task<Void, Never>?
+    private let debounceInterval: TimeInterval = 3.0
+
     private func updateActivity(_ activity: CMMotionActivity) {
-        lastActivity = activity
-        Task { [weak self] in
-            guard let self else { return }
-            _rawActivityContinuation.yield(activity)
+        // Debounce: Cancel previous pending update
+        debounceTask?.cancel()
+
+        debounceTask = Task { [weak self] in
+            // Wait for stability
+            try? await Task.sleep(
+                nanoseconds: UInt64(self?.debounceInterval ?? 3.0 * 1_000_000_000))
+
+            guard let self, !Task.isCancelled else { return }
+
+            self.lastActivity = activity
+            self._rawActivityContinuation.yield(activity)
         }
     }
 

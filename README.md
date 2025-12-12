@@ -52,7 +52,7 @@ DataCollector now includes a **trained CoreML model** (`VibeClassifier.mlmodel`)
 ### Model Details
 - **Training Data**: 2,284 weighted samples from research-backed dataset
 - **Features**: timestamp, distance, activity, duration, hour, dayOfWeek  
-- **Target**: Vibe (Sleep, Energetic, Focus, Commute, Chill, Morning Routine)
+- **Target**: Vibe (Slumber, Workout, Focus, Commute, Unwind, Morning Ritual)
 - **Algorithm**: Random Forest Classifier
 - **Accuracy**: 100.00% on test set (484 samples)
 
